@@ -1,0 +1,21 @@
+# data: raw downloads and regenerable tables stay out of git
+data/raw/
+data/processed/features.parquet
+data/processed/peak_days.parquet
+*.zip
+*.xlsx
+
+# trained models and large outputs
+outputs/models/
+outputs/reports/*.parquet
+
+# secrets and environment
+.env
+.venv/
+venv/
+
+# python / jupyter / mac
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
