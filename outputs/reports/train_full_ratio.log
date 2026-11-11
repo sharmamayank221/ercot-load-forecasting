@@ -1,2 +1,40 @@
 train 488,098 | val 70,072 | test 58,936 rows, 32 features
-decision_tree      test R2=0.9827 MAPE=6.57%  (6.7s)
+decision_tree      test R2=0.9827 MAPE=6.57%  (7.2s)
+bagging            test R2=0.9872 MAPE=5.95%  (108.6s)
+random_forest      test R2=0.9883 MAPE=5.68%  (370.6s)
+gradient_boosting  test R2=0.9936 MAPE=5.18%  (47.5s)
+xgboost            test R2=0.9927 MAPE=5.11%  (21.6s)
+stacking           test R2=0.9869 MAPE=5.50%  (616.0s)
+
+Leaderboard (test split):
+                       R2    RMSE_MW    MAE_MW  MAPE_pct
+model                                                   
+naive_last_week    0.9566  1266.8268  676.5564    9.0523
+decision_tree      0.9827   800.7375  466.9789    6.5701
+bagging            0.9872   688.8491  413.9434    5.9494
+random_forest      0.9883   658.9544  396.7739    5.6807
+gradient_boosting  0.9936   487.3950  319.9746    5.1843
+xgboost            0.9927   521.1502  328.8717    5.1070
+stacking           0.9869   695.2468  403.0102    5.4988
+
+Best on validation: gradient_boosting
+
+By zone:
+             R2  RMSE_MW   MAE_MW  MAPE_pct
+zone                                       
+coast     0.958  637.777  492.677     3.194
+east      0.927  130.494  100.726     5.435
+farWest  -0.167  437.525  290.488     3.952
+north     0.762  134.659   97.204     5.826
+northC    0.963  886.394  709.341     4.361
+southC    0.937  583.285  455.095     4.784
+southern  0.887  331.455  270.021     5.719
+west      0.809  176.928  144.244     8.204
+
+By season:
+           R2  RMSE_MW   MAE_MW  MAPE_pct
+season                                   
+fall    0.992  569.120  387.896     6.110
+spring  0.993  424.423  278.410     4.862
+summer  0.996  463.684  302.579     4.014
+winter  0.989  518.221  338.206     6.508

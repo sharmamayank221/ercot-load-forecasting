@@ -89,13 +89,15 @@ def model_zoo(quick, trees=300):
     }
     # meta-learner is linear: a tree meta-learner cannot extrapolate past the out-of-fold
     # prediction range, which matters when demand keeps growing (v1 stacking got 13.8% MAPE)
+    rf_small = RandomForestRegressor(n_estimators=max(20, n // 2), max_depth=16, min_samples_leaf=5,
+                                     n_jobs=-1, random_state=rs)   # keeps stacking affordable
     zoo["stacking"] = TimeStacking(
-        estimators=[("rf", rf), ("xgb", xgb), ("gb", zoo["gradient_boosting"])],
+        estimators=[("rf", rf_small), ("xgb", xgb), ("gb", zoo["gradient_boosting"])],
         final_estimator=RidgeCV(alphas=(0.1, 1.0, 10.0)))
     return zoo
 
 
-def main(quick=False, trees=300, ratio_target=False):
+def main(quick=False, trees=300, ratio_target=False, models=None):
     """ratio_target: fit y / load_roll7d instead of y, then multiply back.
 
     Trees cannot predict values above anything seen in training, so with demand growing
@@ -119,7 +121,17 @@ def main(quick=False, trees=300, ratio_target=False):
 
     base_col = "load_roll7d"
     y_train = train[TARGET] / train[base_col] if ratio_target else train[TARGET]
-    for name, model in model_zoo(quick, trees).items():
+    tag = ("_quick" if quick else "") + ("_ratio" if ratio_target else "")
+    zoo = model_zoo(quick, trees)
+    if models:                      # retrain only some models, keep the rest of the leaderboard
+        zoo = {k: v for k, v in zoo.items() if k in models}
+        old_lb = pd.read_csv(OUT_REPORTS / f"leaderboard{tag}.csv")
+        leaderboard = old_lb[~old_lb.model.isin(list(zoo))].to_dict("records")
+        old_preds = pd.read_parquet(OUT_REPORTS / f"test_predictions{tag}.parquet")
+        for c in old_preds.columns:
+            if c not in preds.columns and c not in zoo:
+                preds[c] = old_preds[c].values
+    for name, model in zoo.items():
         t0 = time.time()
         model.fit(train[feats], y_train)
         fit_s = round(time.time() - t0, 1)
@@ -135,7 +147,6 @@ def main(quick=False, trees=300, ratio_target=False):
         print(f"{name:18s} test R2={m['R2']:.4f} MAPE={m['MAPE_pct']:.2f}%  ({fit_s}s)")
 
     lb = pd.DataFrame(leaderboard).round(4)
-    tag = ("_quick" if quick else "") + ("_ratio" if ratio_target else "")
     lb.to_csv(OUT_REPORTS / f"leaderboard{tag}.csv", index=False)
     preds.to_parquet(OUT_REPORTS / f"test_predictions{tag}.parquet", index=False)
 
@@ -157,6 +168,7 @@ if __name__ == "__main__":
     ap.add_argument("--quick", action="store_true", help="10% sample, small models")
     ap.add_argument("--ratio-target", action="store_true",
                     help="predict load / 7-day rolling load, then rescale (handles demand growth)")
+    ap.add_argument("--models", nargs="*", help="retrain only these models (e.g. --models stacking)")
     ap.add_argument("--trees", type=int, default=300,
                     help="forest size for the full run (XGBoost rounds = 3x this); lower on slow machines")
     main(**vars(ap.parse_args()))

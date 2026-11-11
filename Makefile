@@ -4,7 +4,9 @@ features:
 quick: features
 	python -m src.train --quick
 train: features
-	python -m src.train
+	python -m src.train --ratio-target
 peak:
 	python -m src.peak_days
-all: features train peak
+report:
+	python -m src.report --tag _ratio
+all: features train peak report

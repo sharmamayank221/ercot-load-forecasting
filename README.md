@@ -35,7 +35,7 @@ cp .env.example .env        # only needed to re-pull ERCOT API data
 
 ```bash
 make quick     # features + 10% sample training, ~1 min, to check everything works
-make train     # full model ladder (several minutes)
+make train     # full model ladder (several minutes; add --trees 60 --ratio-target on a laptop)
 make peak      # high-peak-day label and classifier
 pytest -q      # sanity checks
 ```
@@ -54,32 +54,54 @@ pytest -q      # sanity checks
 * **Peak-day label:** day's system peak above the 90th percentile of daily peaks for the same
   month over the previous two years (rolling, so demand growth does not inflate the label).
 
-## First results (10% sample, `make quick`, test = 2026)
+## Results (full data, `python -m src.train --trees 60 --ratio-target`, test = Jan–Nov 2026)
 
-| model | R² | MAE (MW) | MAPE |
-| --- | --- | --- | --- |
-| naive last week | 0.957 | 670 | 8.9% |
-| decision tree | 0.977 | 574 | 7.9% |
-| random forest | 0.984 | 479 | 6.7% |
-| gradient boosting | **0.989** | **393** | **5.4%** |
-| XGBoost | 0.986 | 441 | 6.2% |
-| stacking | 0.987 | 414 | 5.9% |
+Target is predicted as a ratio to the 7-day rolling load and scaled back (`--ratio-target`):
+plain-MW targets let tree models under-predict the newest, highest-demand year.
 
-Peak-day classifier (test = 2025–26): random forest recall 0.72 / precision 0.96 / PR-AUC 0.95;
-logistic regression recall 0.89 / F1 0.82; seasonal-naive baseline F1 0.34.
+| model | R² | RMSE (MW) | MAE (MW) | MAPE |
+| --- | --- | --- | --- | --- |
+| naive, same hour last week | 0.957 | 1,267 | 677 | 9.05% |
+| decision tree | 0.983 | 801 | 467 | 6.57% |
+| bagging | 0.987 | 689 | 414 | 5.95% |
+| random forest | 0.988 | 659 | 397 | 5.68% |
+| **gradient boosting** | **0.994** | **487** | **320** | 5.18% |
+| XGBoost | 0.993 | 521 | 329 | **5.11%** |
+| stacking (RF + XGB + GB → ridge) | 0.987 | 695 | 403 | 5.50% |
 
-Notes from the first run, to investigate:
-* Far West zone has a negative test R²: its load is nearly flat within a day but has grown
-  fast (oil, gas and data-centre load), so the model under-predicts the 2026 level.
-  Candidate fixes: zone-specific trend, or train one model per zone.
-* Even with the rolling cutoff, 43% of 2025–26 days are labelled high-peak (26% in training),
-  because growth accelerated. A one-year lookback or a trend-adjusted cutoff may be needed.
-* Weather features are *observed* weather; real day-ahead forecasts will be noisier.
+Best on validation (2025): gradient boosting. Its 2026 error by zone and season:
+
+| zone | MAPE | | season | MAPE |
+| --- | --- | --- | --- | --- |
+| Coast | 3.2% | | spring | 4.9% |
+| North Central | 4.4% | | summer | 4.0% |
+| South Central | 4.8% | | fall | 6.1% |
+| Far West | 4.0% | | winter | 6.5% |
+| West | 8.2% | | | |
+
+Peak-day classifier (growth-adjusted label, test = 2025–26): XGBoost recall 0.64 / precision 0.87 /
+F1 0.74 / PR-AUC 0.85; seasonal-naive baseline F1 0.17. See `outputs/reports/`.
+
+Figures: `outputs/figures/record_week_ratio.png` (actual vs forecast vs naive in the week of
+the 2026 record peak), `leaderboard_ratio.png`, `mape_by_hour_ratio.png`.
+
+### Findings so far
+* **Demand growth is the main modelling problem.** With a plain MW target, Far West (oil, gas
+  and data-centre growth) had R² < 0 and tree stacking failed (13.8% MAPE) because trees cannot
+  predict above the training range. The ratio target fixed both; zone×trend features did not.
+* **Stacking does not beat its best member yet.** Its out-of-fold predictions come from early,
+  smaller training windows; a linear meta-learner was needed to extrapolate at all.
+* **Peaks are under-forecast.** On the record week the model tracks the shape but misses the
+  top of the highest afternoons by ~2,000 MW (see figure): a candidate for quantile loss or
+  extra weight on summer afternoons.
+* **Winter and fall are the weakest seasons** (6–6.5% MAPE) and West the weakest zone.
+* Weather features are *observed*; real day-ahead forecasts will be noisier.
 
 ## Roadmap
 
-1. Full training run and hyperparameter search (randomized search, TimeSeriesSplit).
-2. Per-zone error analysis; fix Far West.
+1. Hyperparameter search (randomized search, TimeSeriesSplit); try quantile / weighted loss
+   for peak hours; per-zone models for West and North.
+2. Stacking: wider out-of-fold windows or train the meta-learner on 2025 only.
 3. Compare against ERCOT's own seven-day forecast (API report NP3-565-CD).
 4. Grid-analyst agent: tools `get_load`, `get_weather`, `forecast_load`, `what_if`,
    `peak_risk`, `explain`, `draft_briefing`; 20 known-answer test questions.
