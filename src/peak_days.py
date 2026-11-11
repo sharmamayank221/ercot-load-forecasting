@@ -1,8 +1,10 @@
 """Build the high-peak-day label and train the peak-day classifier.
 
-Label: a day is high-peak (1) when its system-wide peak hour exceeds the 90th percentile
-of daily peaks for the same calendar month over the previous two years. The cutoff
-rolls forward each year so demand growth does not inflate the label.
+Label: a day is high-peak (1) when its growth-adjusted peak -- the day's system peak divided
+by the trailing 365-day mean of daily peaks -- exceeds the 90th percentile of that ratio for
+the same calendar month over the previous two years. Dividing by the trailing mean removes
+demand growth, so the label stays near 1 day in 10 in every year (a plain MW cutoff flagged
+half of all 2026 days).
 
 Run:  python -m src.peak_days
 """
@@ -35,13 +37,17 @@ def daily_table():
 
 
 def add_rolling_label(d):
+    d = d.sort_values("day").reset_index(drop=True)
+    d["trail_mean_mw"] = d.peak_mw.rolling(365, min_periods=300).mean()
+    d["peak_ratio"] = d.peak_mw / d.trail_mean_mw            # growth-adjusted peak
     cut = {}
     for (y, m), _ in d.groupby(["year", "month"]):
         hist = d[(d.month == m) & (d.year >= y - LOOKBACK_YEARS) & (d.year < y)]
-        cut[(y, m)] = hist.peak_mw.quantile(PCT) if len(hist) >= 30 else np.nan
-    d["cutoff_mw"] = [cut[(y, m)] for y, m in zip(d.year, d.month)]
-    d = d.dropna(subset=["cutoff_mw"]).copy()
-    d["high_peak"] = (d.peak_mw > d.cutoff_mw).astype(int)
+        cut[(y, m)] = hist.peak_ratio.quantile(PCT) if hist.peak_ratio.notna().sum() >= 25 else np.nan
+    d["cutoff_ratio"] = [cut[(y, m)] for y, m in zip(d.year, d.month)]
+    d = d.dropna(subset=["cutoff_ratio", "peak_ratio"]).copy()
+    d["cutoff_mw"] = d.cutoff_ratio * d.trail_mean_mw        # same cutoff expressed in MW
+    d["high_peak"] = (d.peak_ratio > d.cutoff_ratio).astype(int)
     return d
 
 
@@ -55,6 +61,7 @@ def add_features(d):
     d["peak_roll7"] = d.peak_mw.rolling(7).mean()
     d["cutoff_next"] = d.cutoff_mw.shift(-1)
     d["gap_to_cutoff"] = d.peak_today / d.cutoff_next
+    d["ratio_today"] = d.peak_ratio
     for z in ZONES:
         d[f"tmax_next_{z}"] = d[f"tmax_{z}"].shift(-1)  # tomorrow's forecast high (observed here)
     d["dow_next"] = (d.dow + 1) % 7
@@ -66,7 +73,7 @@ def main():
     d = add_features(add_rolling_label(daily_table()))
     d.to_parquet(PEAK_TABLE, index=False)
     feats = (["peak_today", "peak_lag1", "peak_lag7", "peak_roll7", "cutoff_next",
-              "gap_to_cutoff", "dow_next", "month_next"] + [f"tmax_next_{z}" for z in ZONES])
+              "gap_to_cutoff", "ratio_today", "dow_next", "month_next"] + [f"tmax_next_{z}" for z in ZONES])
     train = d[d.day <= TRAIN_END]
     test = d[d.day > TRAIN_END]              # 2025 + 2026
     print(f"days: train {len(train)} (positives {train.y_next.mean():.1%}), "

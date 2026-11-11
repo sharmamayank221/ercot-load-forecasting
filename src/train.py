@@ -2,6 +2,8 @@
 
 Run:  python -m src.train            # full run (takes a while)
       python -m src.train --quick    # 10% sample, small models, for a smoke test
+      python -m src.train --trees 80 # full data, lighter ensembles (single-core laptop)
+      python -m src.train --ratio-target   # growth-robust target (recommended, see main())
 
 Split is chronological: train <= 2024, validate 2025, test 2026.
 Models: naive (same hour last week) -> decision tree -> random forest / bagging
@@ -17,6 +19,7 @@ import pandas as pd
 from sklearn.base import BaseEstimator, RegressorMixin, clone
 from sklearn.ensemble import (BaggingRegressor, HistGradientBoostingRegressor,
                               RandomForestRegressor)
+from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.tree import DecisionTreeRegressor
 from xgboost import XGBRegressor
@@ -66,12 +69,12 @@ class TimeStacking(BaseEstimator, RegressorMixin):
         return self.final_.predict(Z)
 
 
-def model_zoo(quick):
-    n = 60 if quick else 300
+def model_zoo(quick, trees=300):
+    n = 60 if quick else trees
     rs = RANDOM_STATE
     rf = RandomForestRegressor(n_estimators=n, max_depth=18, min_samples_leaf=5,
                                n_jobs=-1, random_state=rs)
-    xgb = XGBRegressor(n_estimators=200 if quick else 1200, learning_rate=0.05, max_depth=8,
+    xgb = XGBRegressor(n_estimators=200 if quick else max(400, trees * 3), learning_rate=0.05, max_depth=8,
                        subsample=0.8, colsample_bytree=0.8, n_jobs=-1, random_state=rs,
                        tree_method="hist")
     zoo = {
@@ -84,14 +87,21 @@ def model_zoo(quick):
                                                            random_state=rs),
         "xgboost": xgb,
     }
+    # meta-learner is linear: a tree meta-learner cannot extrapolate past the out-of-fold
+    # prediction range, which matters when demand keeps growing (v1 stacking got 13.8% MAPE)
     zoo["stacking"] = TimeStacking(
-        estimators=[("rf", rf), ("xgb", xgb)],
-        final_estimator=HistGradientBoostingRegressor(max_iter=200, learning_rate=0.05,
-                                                      random_state=rs))
+        estimators=[("rf", rf), ("xgb", xgb), ("gb", zoo["gradient_boosting"])],
+        final_estimator=RidgeCV(alphas=(0.1, 1.0, 10.0)))
     return zoo
 
 
-def main(quick=False):
+def main(quick=False, trees=300, ratio_target=False):
+    """ratio_target: fit y / load_roll7d instead of y, then multiply back.
+
+    Trees cannot predict values above anything seen in training, so with demand growing
+    every year they under-predict the newest data (Far West got a negative R2). Predicting
+    the ratio to recent load lets the trend come from the data itself.
+    """
     df = pd.read_parquet(FEATURE_TABLE)
     if quick:
         df = df.sample(frac=0.10, random_state=RANDOM_STATE).sort_values("timestamp")
@@ -107,12 +117,16 @@ def main(quick=False):
         leaderboard.append({"model": "naive_last_week", "split": name, **m, "fit_s": 0})
     preds["naive_last_week"] = test["load_lag_168h"].values
 
-    for name, model in model_zoo(quick).items():
+    base_col = "load_roll7d"
+    y_train = train[TARGET] / train[base_col] if ratio_target else train[TARGET]
+    for name, model in model_zoo(quick, trees).items():
         t0 = time.time()
-        model.fit(train[feats], train[TARGET])
+        model.fit(train[feats], y_train)
         fit_s = round(time.time() - t0, 1)
         for sname, frame in [("val", val), ("test", test)]:
             p = model.predict(frame[feats])
+            if ratio_target:
+                p = p * frame[base_col].values
             m = regression_metrics(frame[TARGET], p)
             leaderboard.append({"model": name, "split": sname, **m, "fit_s": fit_s})
             if sname == "test":
@@ -121,7 +135,7 @@ def main(quick=False):
         print(f"{name:18s} test R2={m['R2']:.4f} MAPE={m['MAPE_pct']:.2f}%  ({fit_s}s)")
 
     lb = pd.DataFrame(leaderboard).round(4)
-    tag = "_quick" if quick else ""
+    tag = ("_quick" if quick else "") + ("_ratio" if ratio_target else "")
     lb.to_csv(OUT_REPORTS / f"leaderboard{tag}.csv", index=False)
     preds.to_parquet(OUT_REPORTS / f"test_predictions{tag}.parquet", index=False)
 
@@ -141,4 +155,8 @@ def main(quick=False):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true", help="10% sample, small models")
+    ap.add_argument("--ratio-target", action="store_true",
+                    help="predict load / 7-day rolling load, then rescale (handles demand growth)")
+    ap.add_argument("--trees", type=int, default=300,
+                    help="forest size for the full run (XGBoost rounds = 3x this); lower on slow machines")
     main(**vars(ap.parse_args()))

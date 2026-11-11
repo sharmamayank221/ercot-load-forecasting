@@ -1,0 +1,2 @@
+train 488,098 | val 70,072 | test 58,936 rows, 32 features
+decision_tree      test R2=0.9827 MAPE=6.57%  (6.7s)
