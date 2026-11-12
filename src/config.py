@@ -21,3 +21,6 @@ VAL_END = "2025-12-31 23:00"
 LOAD_LAGS_H = [48, 168]
 BALANCE_POINT_F = 65.0      # degree-hour base temperature
 RANDOM_STATE = 42
+
+for _p in (DATA_PROCESSED, OUT_MODELS, OUT_REPORTS, OUT_FIGURES):
+    _p.mkdir(parents=True, exist_ok=True)

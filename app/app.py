@@ -103,7 +103,8 @@ elif page == "Explore data":
     st.plotly_chart(fig, use_container_width=True)
 
     c1, c2 = st.columns(2)
-    sm = df[(df.zone == z) & df.timestamp.dt.month.isin([6, 7, 8])]; sm = sm.sample(min(20000, len(sm)), random_state=1)
+    sm = df[(df.zone == z) & df.timestamp.dt.month.isin([6, 7, 8])]
+    sm = sm.sample(min(20000, len(sm)), random_state=1)
     c1.plotly_chart(px.scatter(sm, x="temp_f", y="load_mw", opacity=0.2, title=f"{zone}: summer load vs temperature",
                                labels={"temp_f": "°F", "load_mw": "MW"}), use_container_width=True)
     prof = df[df.zone == z].groupby([df.timestamp.dt.month.rename("month"), df.timestamp.dt.hour.rename("hour")]).load_mw.mean().unstack()
@@ -213,8 +214,8 @@ else:
         from dotenv import load_dotenv; load_dotenv(ROOT / ".env")
     except ImportError:
         pass
-    if "ANTHROPIC_API_KEY" not in os.environ:
-        st.warning("Set ANTHROPIC_API_KEY in .env to enable the agent. The tools below work without it.")
+    provider = os.environ.get("LLM_PROVIDER") or ("anthropic" if os.environ.get("ANTHROPIC_API_KEY") else "ollama")
+    st.caption(f"LLM backend: **{provider}**" + (f" · model {os.environ.get('OLLAMA_MODEL', 'qwen2.5:7b')} (run `ollama serve`)" if provider == "ollama" else ""))
     if "chat" not in st.session_state:
         st.session_state.chat = []
     for role, text in st.session_state.chat:

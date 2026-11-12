@@ -13,6 +13,7 @@ jupyter
 pytest
 langchain>=0.3
 langchain-anthropic
+langchain-ollama
 langgraph
 python-dotenv
 streamlit>=1.40

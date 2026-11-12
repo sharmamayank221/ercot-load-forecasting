@@ -1,7 +1,12 @@
 """Grid-analyst agent: a tool-calling LLM over the trained models and data.
 
 Run:  python -m src.agent.agent "Will North Central demand break 29,000 MW on 2026-07-22?"
-Needs: pip install langchain langchain-anthropic langgraph   and   ANTHROPIC_API_KEY in .env
+
+Backends (set LLM_PROVIDER in .env):
+  ollama    local, free:  brew install ollama; ollama pull qwen2.5:7b;  pip install langchain-ollama
+            (model from OLLAMA_MODEL, default qwen2.5:7b; must be a tool-calling model)
+  anthropic cloud:        pip install langchain-anthropic; ANTHROPIC_API_KEY in .env
+Default is ollama if no ANTHROPIC_API_KEY is set.
 """
 import json
 import os
@@ -23,14 +28,25 @@ Rules:
 - Keep answers short: the key numbers, one sentence of interpretation, the tools used."""
 
 
-def build_agent(model_name=None):
+def build_llm(model_name=None):
+    provider = os.environ.get("LLM_PROVIDER") or ("anthropic" if os.environ.get("ANTHROPIC_API_KEY") else "ollama")
+    if provider == "ollama":
+        try:
+            from langchain_ollama import ChatOllama
+        except ImportError as e:
+            raise SystemExit("pip install langchain-ollama") from e
+        return ChatOllama(model=model_name or os.environ.get("OLLAMA_MODEL", "qwen2.5:7b"),
+                          temperature=0, num_ctx=8192)
     try:
         from langchain_anthropic import ChatAnthropic
-        llm = ChatAnthropic(model=model_name or "claude-sonnet-4-6", temperature=0)
     except ImportError as e:
         raise SystemExit("pip install langchain-anthropic") from e
+    return ChatAnthropic(model=model_name or "claude-sonnet-4-6", temperature=0)
+
+
+def build_agent(model_name=None):
     tools = [tool(f) for f in PLAIN_TOOLS]
-    return create_react_agent(llm, tools, prompt=SYSTEM)
+    return create_react_agent(build_llm(model_name), tools, prompt=SYSTEM)
 
 
 def ask(question, agent=None):
@@ -46,8 +62,6 @@ if __name__ == "__main__":
         from dotenv import load_dotenv; load_dotenv()
     except ImportError:
         pass
-    if "ANTHROPIC_API_KEY" not in os.environ:
-        sys.exit("set ANTHROPIC_API_KEY in .env or the environment")
     q = " ".join(sys.argv[1:]) or "What was the Coast zone peak on 2026-07-22 and how far off was the forecast?"
     answer, used = ask(q)
     print(answer, "\n\ntools called:", used)
