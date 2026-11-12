@@ -1,5 +1,5 @@
 model,recall,precision,F1,PR_AUC
 logistic,0.888,0.512,0.649,0.692
-random_forest,0.552,0.908,0.687,0.865
-xgboost,0.64,0.87,0.737,0.848
+random_forest,0.56,0.897,0.69,0.865
+xgboost,0.64,0.86,0.734,0.863
 seasonal_naive,0.152,0.202,0.174,
