@@ -13,7 +13,11 @@ import os
 import sys
 
 from langchain_core.tools import tool
-from langgraph.prebuilt import create_react_agent
+
+try:
+    from langchain.agents import create_agent as create_react_agent
+except ImportError:
+    from langgraph.prebuilt import create_react_agent
 
 from src.agent.tools import PLAIN_TOOLS
 
@@ -46,7 +50,7 @@ def build_llm(model_name=None):
 
 def build_agent(model_name=None):
     tools = [tool(f) for f in PLAIN_TOOLS]
-    return create_react_agent(build_llm(model_name), tools, prompt=SYSTEM)
+    return create_react_agent(build_llm(model_name), tools, system_prompt=SYSTEM)
 
 
 def ask(question, agent=None):
