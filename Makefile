@@ -1,4 +1,6 @@
-.PHONY: features train quick peak all
+.PHONY: features train quick peak all app
+app:
+	streamlit run app/app.py
 features:
 	python -m src.features
 quick: features

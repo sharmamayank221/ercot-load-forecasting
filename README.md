@@ -20,6 +20,7 @@ src/evaluate.py   metrics helpers
 src/tune.py       randomized search + peak-hour weighting -> python -m src.tune
 src/report.py     figures from test predictions -> python -m src.report --tag _ratio
 src/agent/        agent tools, LangChain agent, known-answer evaluation questions
+app/app.py        Streamlit dashboard -> streamlit run app/app.py
 notebooks/01_eda.py   EDA cells (VS Code notebook cells)
 outputs/reports/  leaderboards and per-zone / per-season metrics
 outputs/models/   saved models (not in git)
@@ -41,6 +42,7 @@ make quick     # features + 10% sample training, ~1 min, to check everything wor
 make train     # full model ladder (several minutes; add --trees 60 --ratio-target on a laptop)
 make peak      # high-peak-day label and classifier
 pytest -q      # sanity checks
+streamlit run app/app.py   # dashboard at http://localhost:8501
 ```
 
 ## Method
@@ -103,6 +105,14 @@ LLM; `src/agent/eval_questions.json` holds the known-answer questions used to sc
 Run the agent with `python -m src.agent.agent "your question"` after
 `pip install langchain langchain-anthropic langgraph python-dotenv` and setting
 `ANTHROPIC_API_KEY` in `.env`.
+
+### Dashboard (`app/app.py`)
+Six pages: **Overview** (growth, leaderboard, zone shares), **Explore data** (load vs
+temperature for any zone and date range, month×hour heat map), **Forecast** (actual vs
+model vs naive for any zone-day, with error breakdowns), **What-if** (temperature slider and
+sensitivity curve), **Peak days** (daily peaks against the rolling cutoff, classifier
+results) and **Ask the analyst** (chat with the agent, or call any tool directly).
+Needs `make train` and `make peak` to have run; the agent page needs `ANTHROPIC_API_KEY`.
 
 ### Findings so far
 * **Demand growth is the main modelling problem.** With a plain MW target, Far West (oil, gas
