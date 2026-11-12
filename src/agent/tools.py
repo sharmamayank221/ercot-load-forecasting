@@ -152,4 +152,17 @@ def model_card() -> dict:
             "leaderboard_test_mape_pct": test["MAPE_pct"].round(2).to_dict() if len(test) else {}}
 
 
-PLAIN_TOOLS = [get_load, get_weather, forecast_load, what_if, peak_risk, explain, model_card]
+def _safe(fn):
+    """Return errors as data so the agent can explain them instead of crashing."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:          # noqa: BLE001
+            return {"error": f"{type(e).__name__}: {e}"}
+    return wrapped
+
+
+PLAIN_TOOLS = [_safe(f) for f in (get_load, get_weather, forecast_load, what_if, peak_risk, explain, model_card)]
