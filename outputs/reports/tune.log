@@ -1,0 +1,23 @@
+ 0 hgb w=0 val MAPE 4.65 test MAPE 5.18 peak-hours 4.52 (46.7s)
+ 0 hgb w=1 val MAPE 4.66 test MAPE 5.22 peak-hours 4.21 (54.4s)
+ 1 xgb w=0 val MAPE 4.97 test MAPE 5.13 peak-hours 4.31 (14.0s)
+ 1 xgb w=1 val MAPE 4.86 test MAPE 5.16 peak-hours 4.47 (14.0s)
+ 2 hgb w=0 val MAPE 4.49 test MAPE 5.08 peak-hours 4.53 (42.0s)
+ 2 hgb w=1 val MAPE 4.52 test MAPE 5.09 peak-hours 4.36 (47.0s)
+ 3 xgb w=0 val MAPE 4.65 test MAPE 5.15 peak-hours 5.09 (21.8s)
+ 3 xgb w=1 val MAPE 4.57 test MAPE 5.31 peak-hours 4.68 (21.8s)
+ 4 hgb w=0 val MAPE 4.41 test MAPE 5.02 peak-hours 4.68 (102.9s)
+ 4 hgb w=1 val MAPE 4.39 test MAPE 5.13 peak-hours 4.52 (104.6s)
+ 5 xgb w=0 val MAPE 4.56 test MAPE 5.22 peak-hours 5.01 (61.4s)
+ 5 xgb w=1 val MAPE 4.46 test MAPE 5.23 peak-hours 4.86 (67.2s)
+ 6 hgb w=0 val MAPE 4.44 test MAPE 5.12 peak-hours 4.89 (111.5s)
+ 6 hgb w=1 val MAPE 4.43 test MAPE 5.36 peak-hours 4.66 (124.3s)
+ 7 xgb w=0 val MAPE 4.74 test MAPE 5.12 peak-hours 4.41 (34.5s)
+ 7 xgb w=1 val MAPE 4.76 test MAPE 5.12 peak-hours 4.62 (36.1s)
+ 8 hgb w=0 val MAPE 4.49 test MAPE 5.05 peak-hours 4.45 (84.0s)
+ 8 hgb w=1 val MAPE 4.46 test MAPE 5.03 peak-hours 4.37 (97.0s)
+ 9 xgb w=0 val MAPE 4.58 test MAPE 5.22 peak-hours 4.92 (44.6s)
+ 9 xgb w=1 val MAPE 4.59 test MAPE 5.36 peak-hours 4.37 (46.0s)
+
+best on validation: hgb {'max_iter': 1500, 'learning_rate': 0.08, 'max_depth': 12, 'max_leaf_nodes': 127, 'min_samples_leaf': 50, 'l2_regularization': 0.0} peak_weighted = True
+its test metrics: {'test_R2': 0.9933, 'test_RMSE_MW': 497.76, 'test_MAE_MW': 322.6932, 'test_MAPE_pct': 5.1323, 'test_peak_MAPE_pct': 4.5222}

@@ -17,6 +17,9 @@ src/features.py   feature engineering  -> python -m src.features
 src/train.py      model ladder + leaderboard -> python -m src.train [--quick]
 src/peak_days.py  high-peak-day label + classifier -> python -m src.peak_days
 src/evaluate.py   metrics helpers
+src/tune.py       randomized search + peak-hour weighting -> python -m src.tune
+src/report.py     figures from test predictions -> python -m src.report --tag _ratio
+src/agent/        agent tools, LangChain agent, known-answer evaluation questions
 notebooks/01_eda.py   EDA cells (VS Code notebook cells)
 outputs/reports/  leaderboards and per-zone / per-season metrics
 outputs/models/   saved models (not in git)
@@ -85,6 +88,22 @@ F1 0.74 / PR-AUC 0.85; seasonal-naive baseline F1 0.17. See `outputs/reports/`.
 Figures: `outputs/figures/record_week_ratio.png` (actual vs forecast vs naive in the week of
 the 2026 record peak), `leaderboard_ratio.png`, `mape_by_hour_ratio.png`.
 
+### Tuning and peak weighting (`python -m src.tune --n-iter 4`, 20 fits)
+Randomized search over gradient boosting and XGBoost, selected on the 2025 validation year.
+Best: gradient boosting (1,500 iterations, lr 0.08, 127 leaves, peak-weighted) with
+validation MAPE 4.39% and test MAPE 5.13% (default: 4.65% / 5.18%). Weighting summer
+afternoons ×3 cut peak-hour test MAPE from 4.5% to 4.2–4.4% at a small cost elsewhere.
+The gains are small: the models are close to what these features allow, so the next step
+is better features (real weather forecasts, holidays around weekends) rather than more tuning.
+
+### Grid-analyst agent (`src/agent/`)
+Seven tools over the data and the tuned model: `get_load`, `get_weather`, `forecast_load`,
+`what_if`, `peak_risk`, `explain`, `model_card`. `tests/test_tools.py` checks them without an
+LLM; `src/agent/eval_questions.json` holds the known-answer questions used to score the agent.
+Run the agent with `python -m src.agent.agent "your question"` after
+`pip install langchain langchain-anthropic langgraph python-dotenv` and setting
+`ANTHROPIC_API_KEY` in `.env`.
+
 ### Findings so far
 * **Demand growth is the main modelling problem.** With a plain MW target, Far West (oil, gas
   and data-centre growth) had R² < 0 and tree stacking failed (13.8% MAPE) because trees cannot
@@ -99,9 +118,8 @@ the 2026 record peak), `leaderboard_ratio.png`, `mape_by_hour_ratio.png`.
 
 ## Roadmap
 
-1. Hyperparameter search (randomized search, TimeSeriesSplit); try quantile / weighted loss
-   for peak hours; per-zone models for West and North.
+1. Per-zone models for West and North; quantile loss for peak hours.
 2. Stacking: wider out-of-fold windows or train the meta-learner on 2025 only.
 3. Compare against ERCOT's own seven-day forecast (API report NP3-565-CD).
-4. Grid-analyst agent: tools `get_load`, `get_weather`, `forecast_load`, `what_if`,
-   `peak_risk`, `explain`, `draft_briefing`; 20 known-answer test questions.
+4. Agent: run the known-answer evaluation with a live LLM, add `draft_briefing`, grow the
+   question set to 20.

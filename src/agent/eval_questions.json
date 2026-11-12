@@ -1,0 +1,12 @@
+[
+ {"q": "What was the North Central peak load on 2026-07-22?", "tools": ["get_load"], "check": {"tool": "get_load", "args": {"zone": "northC", "start": "2026-07-22", "end": "2026-07-22"}, "field": "max_mw"}},
+ {"q": "How high did the temperature get at DFW (North Central) on 2026-07-22?", "tools": ["get_weather"], "check": {"tool": "get_weather", "args": {"zone": "northC", "date": "2026-07-22"}, "field": "temp_high_f"}},
+ {"q": "What did the model forecast for Coast's peak on 2026-07-22?", "tools": ["forecast_load"], "check": {"tool": "forecast_load", "args": {"zone": "coast", "date": "2026-07-22"}, "field": "peak_mw"}},
+ {"q": "If 2026-08-15 had been 5 degrees F hotter, how much would the South Central peak change?", "tools": ["what_if"], "check": {"tool": "what_if", "args": {"zone": "southC", "date": "2026-08-15", "temp_shift_f": 5}, "field": "peak_change_mw"}},
+ {"q": "Was 2026-07-22 a high-peak day for the ERCOT system?", "tools": ["peak_risk"], "check": {"tool": "peak_risk", "args": {"date": "2026-07-22"}, "field": "high_peak_day"}},
+ {"q": "What drove the Far West forecast on 2026-03-10?", "tools": ["explain"], "check": {"tool": "explain", "args": {"zone": "farWest", "date": "2026-03-10"}, "field": "model"}},
+ {"q": "Which model is being used and how accurate is it?", "tools": ["model_card"], "check": {"tool": "model_card", "args": {}, "field": "model_file"}},
+ {"q": "What was the average Coast load in the first week of January 2026?", "tools": ["get_load"], "check": {"tool": "get_load", "args": {"zone": "coast", "start": "2026-01-01", "end": "2026-01-07"}, "field": "mean_mw"}},
+ {"q": "How wrong was the West zone forecast on 2026-02-14?", "tools": ["forecast_load"], "check": {"tool": "forecast_load", "args": {"zone": "west", "date": "2026-02-14"}, "field": "mape_pct"}},
+ {"q": "Forecast the Southern zone for 2030-01-01.", "tools": [], "check": {"expect_refusal": true}}
+]
