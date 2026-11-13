@@ -20,7 +20,9 @@ src/evaluate.py   metrics helpers
 src/tune.py       randomized search + peak-hour weighting -> python -m src.tune
 src/report.py     figures from test predictions -> python -m src.report --tag _ratio
 src/agent/        agent tools, LangChain agent, known-answer evaluation questions
-app/app.py        Streamlit dashboard -> streamlit run app/app.py
+app/app.py        Streamlit dashboard (quick version) -> make app
+api/main.py       FastAPI backend for the web app -> make api   (http://localhost:8000/docs)
+web/              Next.js + Tailwind front end -> make web      (http://localhost:3000)
 notebooks/01_eda.py   EDA cells (VS Code notebook cells)
 outputs/reports/  leaderboards and per-zone / per-season metrics
 outputs/models/   saved models (not in git)
@@ -106,7 +108,24 @@ Run the agent with `python -m src.agent.agent "your question"` after
 `pip install langchain langchain-anthropic langgraph python-dotenv` and setting
 `ANTHROPIC_API_KEY` in `.env`.
 
-### Dashboard (`app/app.py`)
+### Web app (`api/` + `web/`)
+A FastAPI backend exposes the data, models and agent tools as JSON (`/api/summary`,
+`/api/load`, `/api/profile`, `/api/forecast`, `/api/whatif`, `/api/peaks`, `/api/agent`,
+`/api/tools/{name}`); a Next.js 16 + Tailwind 4 front end (Recharts, Framer Motion, Manrope)
+renders six pages: Overview (the latest day's load drawn as a ribbon coloured by temperature),
+Explore, Forecast, What-if (live slider), Peak days and Analyst (chat with the Ollama agent).
+
+```bash
+make api                       # terminal 1: backend on :8000
+cd web && npm install && cd .. # once
+make web                       # terminal 2: front end on :3000
+```
+The front end reads `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`); copy
+`web/.env.local.example` to `web/.env.local` to change it. To ship it as a desktop app, wrap
+the built front end with Tauri (`npm create tauri-app`) pointing at `npm run start`, with the
+API started as a sidecar; the UI itself needs no changes.
+
+### Streamlit dashboard (`app/app.py`)
 Six pages: **Overview** (growth, leaderboard, zone shares), **Explore data** (load vs
 temperature for any zone and date range, month×hour heat map), **Forecast** (actual vs
 model vs naive for any zone-day, with error breakdowns), **What-if** (temperature slider and

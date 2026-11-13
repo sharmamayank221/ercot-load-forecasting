@@ -131,10 +131,16 @@ def explain(zone: str, date: str) -> dict:
     model, name = _model()
     feats = feature_columns(_features())
     imp = getattr(model, "feature_importances_", None)
+    source = name
+    if imp is None:                                   # HistGradientBoosting has none: borrow XGBoost's
+        xp = OUT_MODELS / "xgboost.joblib"
+        if xp.exists():
+            imp, source = joblib.load(xp).feature_importances_, "xgboost.joblib (importances)"
     top = (sorted(zip(feats, imp), key=lambda t: -t[1])[:8] if imp is not None
-           else [("(model has no importances; use permutation importance)", 0)])
+           else [("no feature importances available", 0)])
     r = _day_rows(z, date)
     return {"zone": ZONE_NAMES[z], "date": str(pd.Timestamp(date).date()), "model": name,
+            "importance_source": source,
             "top_features": [(f, round(float(v), 4)) for f, v in top],
             "inputs": {"temp_high_f": round(r.temp_f.max(), 1),
                        "load_same_hour_last_week_peak_mw": round(r.load_lag_168h.max()),
@@ -152,17 +158,4 @@ def model_card() -> dict:
             "leaderboard_test_mape_pct": test["MAPE_pct"].round(2).to_dict() if len(test) else {}}
 
 
-def _safe(fn):
-    """Return errors as data so the agent can explain them instead of crashing."""
-    import functools
-
-    @functools.wraps(fn)
-    def wrapped(*args, **kwargs):
-        try:
-            return fn(*args, **kwargs)
-        except Exception as e:          # noqa: BLE001
-            return {"error": f"{type(e).__name__}: {e}"}
-    return wrapped
-
-
-PLAIN_TOOLS = [_safe(f) for f in (get_load, get_weather, forecast_load, what_if, peak_risk, explain, model_card)]
+PLAIN_TOOLS = [get_load, get_weather, forecast_load, what_if, peak_risk, explain, model_card]

@@ -1,6 +1,10 @@
-.PHONY: features train quick peak all app
+.PHONY: features train quick peak all app api web
 app:
 	streamlit run app/app.py
+api:
+	uvicorn api.main:app --reload --port 8000
+web:
+	cd web && npm run dev
 features:
 	python -m src.features
 quick: features
