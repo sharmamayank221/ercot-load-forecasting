@@ -21,6 +21,12 @@ except ImportError:
 
 from src.agent.tools import PLAIN_TOOLS
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 SYSTEM = """You are a grid-operations analyst for ERCOT, the Texas power grid.
 Answer questions about electricity demand using ONLY the tools provided.
 Rules:
