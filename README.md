@@ -112,8 +112,8 @@ Run the agent with `python -m src.agent.agent "your question"` after
 A FastAPI backend exposes the data, models and agent tools as JSON (`/api/summary`,
 `/api/load`, `/api/profile`, `/api/forecast`, `/api/whatif`, `/api/peaks`, `/api/agent`,
 `/api/tools/{name}`); a Next.js 16 + Tailwind 4 front end (Recharts, Framer Motion, Manrope)
-renders six pages: Overview (the latest day's load drawn as a ribbon coloured by temperature),
-Explore, Forecast, What-if (live slider), Peak days and Analyst (chat with the Ollama agent).
+renders seven pages: Overview (the latest day's load drawn as a ribbon coloured by temperature),
+The data (EDA: distribution, seasonality, weekday profile, temperature response, zone growth, correlations, Winter Storm Uri, data quality), Explore, Forecast, What-if (live slider), Peak days and Analyst (chat with the Ollama agent).
 
 ```bash
 make api                       # terminal 1: backend on :8000

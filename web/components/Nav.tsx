@@ -1,10 +1,11 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, Compass, LineChart, Thermometer, Flame, MessageSquare } from "lucide-react";
+import { Activity, Compass, LineChart, Thermometer, Flame, MessageSquare, BarChart3 } from "lucide-react";
 
 const items = [
   { href: "/", label: "Overview", icon: Activity },
+  { href: "/eda", label: "The data", icon: BarChart3 },
   { href: "/explore", label: "Explore", icon: Compass },
   { href: "/forecast", label: "Forecast", icon: LineChart },
   { href: "/whatif", label: "What-if", icon: Thermometer },

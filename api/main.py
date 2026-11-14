@@ -147,3 +147,62 @@ def run_tool(name: str, zone: str = "North Central", date: str = "2026-07-22", e
         return fn()
     except Exception as ex:
         return {"error": str(ex)}
+
+
+@app.get("/api/eda")
+def eda():
+    """Everything the EDA page needs, computed once and cached."""
+    return _eda()
+
+
+@lru_cache(maxsize=1)
+def _eda():
+    import numpy as np
+    df = table()
+    sysd = df[df.zone == "northC"].set_index("timestamp")
+    s = sysd["system_total_mw"]
+    # 1 dataset facts
+    facts = {"rows": int(len(df)), "hours": int(len(s)), "zones": 8, "start": str(s.index.min().date()),
+             "end": str(s.index.max().date()), "missing_temp_pct": float(df.temp.isna().mean() * 100),
+             "archive_rows": int((df.source == "archive").sum()), "api_rows": int((df.source == "api").sum()),
+             "uri_hours": int(df[df.uri_flag].timestamp.nunique())}
+    # 2 load distribution (system total)
+    hist, edges = np.histogram(s, bins=40)
+    dist = [{"mw": float((edges[i] + edges[i + 1]) / 2), "hours": int(h)} for i, h in enumerate(hist)]
+    # 3 monthly average and spread
+    g = s.groupby(s.index.month)
+    monthly = [{"month": int(m), "mean": float(v.mean()), "p10": float(v.quantile(0.1)), "p90": float(v.quantile(0.9))} for m, v in g]
+    # 4 weekday vs weekend daily profile (summer)
+    summer = sysd[sysd.index.month.isin([6, 7, 8])]
+    wk = summer[summer.index.dayofweek < 5].groupby(summer[summer.index.dayofweek < 5].index.hour)["system_total_mw"].mean()
+    we = summer[summer.index.dayofweek >= 5].groupby(summer[summer.index.dayofweek >= 5].index.hour)["system_total_mw"].mean()
+    profile = [{"hour": int(h), "weekday": float(wk[h]), "weekend": float(we[h])} for h in range(24)]
+    # 5 temperature response by season (U-shape): bin temp, mean system load, North Central temp as proxy
+    d = sysd.copy(); d["tb"] = (d.temp_f // 5 * 5)
+    seasons = {"summer": [6, 7, 8], "winter": [12, 1, 2], "spring/fall": [3, 4, 5, 9, 10, 11]}
+    resp = []
+    for name, months in seasons.items():
+        q = d[d.index.month.isin(months)].groupby("tb")["system_total_mw"].agg(["mean", "size"])
+        q = q[q["size"] >= 30]
+        for t, r in q.iterrows():
+            resp.append({"season": name, "temp_f": float(t), "mw": float(r["mean"])})
+    # 6 zone growth: average load per zone per year
+    zy = df.groupby([df.timestamp.dt.year, "zone"]).load_mw.mean().unstack()
+    zone_growth = [{"year": int(y), **{ZN[z]: float(v) for z, v in row.items()}} for y, row in zy.iterrows()]
+    # 7 correlations of key drivers with load (North Central)
+    nc = df[df.zone == "northC"].copy()
+    nc["hour"] = nc.timestamp.dt.hour; nc["dow"] = nc.timestamp.dt.dayofweek
+    nc["cdh"] = (nc.temp_f - 65).clip(lower=0); nc["hdh"] = (65 - nc.temp_f).clip(lower=0)
+    cols = ["temp_f", "cdh", "hdh", "dwpt", "rhum", "wspd", "hour", "dow"]
+    corr = [{"feature": c, "r": float(nc[[c, "load_mw"]].corr().iloc[0, 1])} for c in cols]
+    # 8 Winter Storm Uri window: system load vs temperature
+    uri = sysd["2021-02-10":"2021-02-22"]
+    uri_pts = [{"t": ts.isoformat(), "mw": float(m), "temp_f": float(t), "shed": bool(f)}
+               for ts, m, t, f in zip(uri.index, uri.system_total_mw, uri.temp_f, uri.uri_flag)]
+    # 9 missing / quality
+    full = pd.date_range(s.index.min(), s.index.max(), freq="h")
+    missing_hours = int(len(full.difference(s.index)))
+    quality = {"missing_hours": missing_hours, "temp_outliers_fixed": 10, "archive_api_gap_pct": 0.7,
+               "zones_missing_temp": {ZN[z]: int(v) for z, v in df.groupby("zone").temp.apply(lambda x: x.isna().sum()).items() if v > 0}}
+    return {"facts": facts, "dist": dist, "monthly": monthly, "profile": profile, "response": resp,
+            "zone_growth": zone_growth, "corr": corr, "uri": uri_pts, "quality": quality}
