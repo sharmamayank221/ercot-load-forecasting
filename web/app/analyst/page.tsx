@@ -32,7 +32,7 @@ export default function Analyst() {
 
   return (
     <>
-      <PageTitle sub="A local model (Ollama) that answers by calling the project's tools: load history, weather, the forecaster, what-if scenarios and the peak-day classifier. Every number comes from a tool call, and the tools used are listed under each answer.">Ask the grid analyst</PageTitle>
+      <PageTitle sub="A Llama model hosted on Groq that answers by calling the project’s tools: load history, weather, the precomputed forecasts, what-if scenarios and the high-peak labels. Every number comes from a tool call, and the tools used are listed under each answer.">Ask the grid analyst</PageTitle>
       <div className="flex flex-col gap-4">
         {msgs.length === 0 && (
           <div className="flex flex-wrap gap-2">
@@ -50,7 +50,7 @@ export default function Analyst() {
         <div ref={end} />
       </div>
       <form onSubmit={(e) => { e.preventDefault(); send(q); }} className="mt-6 flex gap-2">
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask about any zone and date between 2018 and Nov 2026"
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask about any zone; forecasts cover Jan 2025 to Nov 2026"
           className="flex-1 rounded-md border border-rule bg-panel px-4 py-3 text-[15px]" aria-label="question" />
         <button type="submit" disabled={busy} className="rounded-md bg-heat px-5 py-3 text-[15px] font-semibold text-white disabled:opacity-50">Ask</button>
       </form>

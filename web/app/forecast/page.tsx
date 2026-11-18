@@ -24,12 +24,12 @@ export default function Forecast() {
       <PageTitle sub="The model only sees what was known the day before: the weather, the calendar, and load from two and seven days earlier.">Day-ahead forecast against what happened</PageTitle>
       <div className="flex flex-wrap gap-4">
         <Field label="Zone"><select className={inputCls} value={zone} onChange={(e) => setZone(e.target.value)}>{ZONES.map((z) => <option key={z}>{z}</option>)}</select></Field>
-        <Field label="Date"><input type="date" className={inputCls} value={date} min="2018-01-08" max="2026-11-04" onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Date"><input type="date" className={inputCls} value={date} min="2025-01-01" max="2026-11-04" onChange={(e) => setDate(e.target.value)} /></Field>
       </div>
       {err && <div className="mt-6"><ErrorNote error={err} /></div>}
       {!f ? <div className="mt-8"><Loading /></div> : (
         <>
-          <Section title={`${f.zone}, ${f.date}`} aside={`model: ${f.model.replace(".joblib", "")}`}>
+          <Section title={`${f.zone}, ${f.date}`} aside={`model: ${f.model}`}>
             <HourlyLines series={[
               { key: "actual", name: "actual", color: "var(--ink)", width: 3, values: f.actual_mw },
               { key: "forecast", name: "forecast", color: "var(--heat)", values: f.hourly_mw },

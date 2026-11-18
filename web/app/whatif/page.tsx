@@ -10,23 +10,23 @@ type W = { zone: string; date: string; temp_shift_f: number; base_mw: number[]; 
 export default function WhatIf() {
   const [zone, setZone] = useState("Coast");
   const [date, setDate] = useState("2026-08-15");
-  const [shift, setShift] = useState(5);
+  const [shift, setShift] = useState(6);
   const [w, setW] = useState<W | null>(null);
   const [err, setErr] = useState("");
   useEffect(() => {
-    const id = setTimeout(() => { setErr(""); get<W>("/api/whatif", { zone, date, temp_shift_f: shift }).then(setW).catch((e) => setErr(e.message)); }, 150);
+    const id = setTimeout(() => { setErr(""); get<W>("/api/whatif", { zone, date, temp_shift_f: shift }).then(setW).catch((e) => setErr(e.message)); }, 60);
     return () => clearTimeout(id);
   }, [zone, date, shift]);
 
   const d = w ? w.peak_shifted - w.peak_base : 0;
   return (
     <>
-      <PageTitle sub="Drag the slider to re-run the forecast with every hour of the day warmer or cooler. The model re-computes degree-hours and the 24- and 72-hour temperature history.">If tomorrow is hotter than forecast</PageTitle>
+      <PageTitle sub="Drag the slider to re-run the forecast with every hour of the day warmer or cooler. The forecast is precomputed for shifts in 3°F steps, with degree-hours and the 24- and 72-hour temperature history shifted too.">If tomorrow is hotter than forecast</PageTitle>
       <div className="flex flex-wrap items-end gap-6">
         <Field label="Zone"><select className={inputCls} value={zone} onChange={(e) => setZone(e.target.value)}>{ZONES.map((z) => <option key={z}>{z}</option>)}</select></Field>
-        <Field label="Date"><input type="date" className={inputCls} value={date} min="2018-01-08" max="2026-11-04" onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Date"><input type="date" className={inputCls} value={date} min="2025-01-01" max="2026-11-04" onChange={(e) => setDate(e.target.value)} /></Field>
         <Field label={`Temperature shift: ${shift > 0 ? "+" : ""}${shift}°F`}>
-          <input type="range" min={-15} max={15} step={1} value={shift} onChange={(e) => setShift(Number(e.target.value))} className="w-64" aria-label="temperature shift" />
+          <input type="range" min={-15} max={15} step={3} value={shift} onChange={(e) => setShift(Number(e.target.value))} className="w-64" aria-label="temperature shift" />
         </Field>
       </div>
       {err && <div className="mt-6"><ErrorNote error={err} /></div>}

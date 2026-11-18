@@ -43,7 +43,7 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 export const inputCls = "rounded-md border border-rule bg-panel px-3 py-2 text-[15px] text-ink";
 
 export function ErrorNote({ error }: { error: string }) {
-  return <div className="rounded-md border border-heat bg-heat-soft px-4 py-3 text-[14px]">{error}. Is the API running? Start it with <code>make api</code>.</div>;
+  return <div className="rounded-md border border-heat bg-heat-soft px-4 py-3 text-[14px]">{error}</div>;
 }
 
 export function Loading() {

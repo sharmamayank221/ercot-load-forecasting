@@ -12,9 +12,7 @@ from src.config import MODEL_TABLE, OUT_REPORTS, PEAK_TABLE
 from src.agent import tools as T
 
 app = FastAPI(title="ERCOT load forecasting API")
-import os as _os
-_origins = [o.strip() for o in _os.environ.get("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
-app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 ZN = T.ZONE_NAMES
 
 
@@ -73,7 +71,8 @@ def profile(zone: str = "North Central"):
     df = table()
     d = df[df.zone == z]
     prof = d.groupby([d.timestamp.dt.month, d.timestamp.dt.hour]).load_mw.mean().unstack()
-    summer = d[d.timestamp.dt.month.isin([6, 7, 8])].sample(min(4000, len(d)), random_state=1)
+    summer = d[d.timestamp.dt.month.isin([6, 7, 8])].dropna(subset=["temp_f"])
+    summer = summer.sample(min(4000, len(summer)), random_state=1)
     return {"zone": ZN[z],
             "heatmap": [{"month": int(m), "hour": int(h), "mw": float(v)} for m, row in prof.iterrows() for h, v in row.items()],
             "scatter": [{"temp_f": float(t), "mw": float(m)} for t, m in zip(summer.temp_f, summer.load_mw)]}
