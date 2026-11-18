@@ -1,12 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { MessageSquare, Plus, Trash2 } from "lucide-react";
+import { ArrowUp, Info, MessageSquare, Plus, Trash2, Zap } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { post, fmt } from "@/lib/api";
-import { PageTitle } from "@/components/ui";
 
 type Chart = { title: string; hours: number[]; series: { name: string; values: number[]; kind: "actual" | "forecast" | "alt" | "naive" }[] };
 type Step = { tool: string; args: Record<string, unknown>; result: Record<string, unknown> };
@@ -129,7 +128,7 @@ function History({ chats, active, onOpen, onDelete, onNew, onClear }: {
 }) {
   const groups = chats.reduce<Record<string, Conversation[]>>((g, c) => { (g[groupLabel(c.updated)] ??= []).push(c); return g; }, {});
   return (
-    <aside className="sticky top-6 flex w-60 shrink-0 flex-col gap-4 self-start border-r border-rule pr-5" style={{ maxHeight: "calc(100vh - 48px)" }}>
+    <aside className="flex w-60 shrink-0 flex-col gap-4 border-r border-rule pr-5">
       <button onClick={onNew} className="flex items-center justify-center gap-2 rounded-md bg-ink px-3 py-2 text-[14px] font-semibold text-paper">
         <Plus size={16} /> New chat
       </button>
@@ -169,14 +168,17 @@ export default function Analyst() {
   const [loaded, setLoaded] = useState(false);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
-  const end = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setChats(loadChats()); setLoaded(true); }, []);
   useEffect(() => { if (loaded) saveChats(chats); }, [chats, loaded]);
 
   const current = chats.find((c) => c.id === active) ?? null;
   const msgs = current?.msgs ?? [];
-  useEffect(() => { end.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs.length, busy]);
+  useEffect(() => {   // keep the newest message in view inside the message pane
+    const el = scroller.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [msgs.length, busy, active]);
 
   /** Append a message to a chat and move that chat to the top of the list. */
   const push = (id: string, m: Msg, title?: string) => setChats((list) => {
@@ -209,38 +211,77 @@ export default function Analyst() {
   const clearAll = () => { if (confirm("Delete all saved chats in this browser?")) { setChats([]); setActive(null); } };
 
   return (
-    <>
-      <PageTitle sub="A language model that answers by calling the project's tools: load history, weather, the precomputed forecasts, what-if scenarios and the high-peak labels. Every number comes from a tool call; open “How I got this” under an answer to see each call and its result. Chats are saved in this browser.">Ask the grid analyst</PageTitle>
-      <div className="flex gap-6">
+    <div className="flex h-[calc(100vh-5rem)] flex-col">
+      <header className="mb-5 flex items-end justify-between gap-6 border-b border-rule pb-4">
+        <div>
+          <h1 className="text-[26px] font-extrabold leading-none tracking-tight">Ask the grid analyst</h1>
+          <p className="mt-2 text-[14px] text-muted">Questions about ERCOT demand, answered from the project&apos;s data and models.</p>
+        </div>
+        <details className="relative text-[13px]">
+          <summary className="flex cursor-pointer list-none items-center gap-1 text-muted hover:text-ink"><Info size={15} /> How it works</summary>
+          <div className="absolute right-0 z-10 mt-2 w-80 rounded-md border border-rule bg-panel p-4 leading-relaxed shadow-lg">
+            The model answers only by calling tools over the project&apos;s data: load history, weather, forecasts,
+            what-if scenarios, rankings, error breakdowns and the peak alert. Every number is checked against the tool
+            results (the badge under each answer), and &ldquo;How I got this&rdquo; shows each call. Chats are saved in this browser only.
+          </div>
+        </details>
+      </header>
+
+      <div className="flex min-h-0 flex-1 gap-6">
         <History chats={chats} active={active} onOpen={(id) => { if (!busy) setActive(id); }} onDelete={remove}
           onNew={() => { if (!busy) setActive(null); }} onClear={clearAll} />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-col gap-4">
-            {msgs.length === 0 && (
-              <div className="flex flex-wrap gap-2">
-                {starters.map((s) => <button key={s} onClick={() => send(s)} className="rounded-full border border-rule bg-panel px-4 py-2 text-left text-[14px] hover:border-ink">{s}</button>)}
+
+        <section className="flex min-w-0 flex-1 flex-col">
+          <div ref={scroller} className="flex-1 overflow-y-auto pr-2">
+            {msgs.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center text-center">
+                <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-heat-soft"><Zap size={20} className="text-heat" /></div>
+                <div className="text-[18px] font-semibold">What would you like to know?</div>
+                <p className="mt-1 max-w-[52ch] text-[14px] text-muted">Data covers 2018 to Nov 2026; forecasts and what-if scenarios cover Jan 2025 to Nov 2026. Try one of these:</p>
+                <div className="mt-5 grid w-full max-w-[720px] gap-2 sm:grid-cols-2">
+                  {starters.map((st) => (
+                    <button key={st} onClick={() => send(st)}
+                      className="rounded-lg border border-rule bg-panel px-4 py-3 text-left text-[14px] transition-colors hover:border-ink">{st}</button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="mx-auto flex max-w-[860px] flex-col gap-5 py-2">
+                {msgs.map((m, i) => (
+                  <motion.div key={`${active}-${i}`} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}
+                    className={m.role === "user" ? "max-w-[75%] self-end rounded-2xl rounded-br-sm bg-ink px-4 py-2.5 text-[15px] text-paper"
+                      : "w-full rounded-2xl rounded-tl-sm border border-rule bg-panel px-5 py-4 text-[15px] leading-relaxed"}>
+                    {m.role === "user" ? m.text : <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>{m.text}</ReactMarkdown>}
+                    {m.grounding && <GroundingBadge g={m.grounding} />}
+                    {m.charts?.slice(0, 2).map((c, j) => <MiniChart key={j} c={c} />)}
+                    {m.trace && <Trace steps={m.trace} model={m.model} />}
+                  </motion.div>
+                ))}
+                {busy && (
+                  <div className="flex items-center gap-2 self-start rounded-2xl rounded-tl-sm border border-rule bg-panel px-4 py-3 text-[14px] text-muted">
+                    <span className="flex gap-1">{[0, 1, 2].map((d) => (
+                      <motion.span key={d} className="h-1.5 w-1.5 rounded-full bg-muted" animate={{ opacity: [0.3, 1, 0.3] }}
+                        transition={{ duration: 1, repeat: Infinity, delay: d * 0.2 }} />))}</span>
+                    calling tools
+                  </div>
+                )}
               </div>
             )}
-            {msgs.map((m, i) => (
-              <motion.div key={`${active}-${i}`} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}
-                className={m.role === "user" ? "max-w-[70ch] self-end rounded-lg bg-ink px-4 py-3 text-[15px] text-paper"
-                  : "w-full max-w-[80ch] rounded-lg border border-rule bg-panel px-4 py-3 text-[15px] leading-relaxed"}>
-                {m.role === "user" ? m.text : <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>{m.text}</ReactMarkdown>}
-                {m.grounding && <GroundingBadge g={m.grounding} />}
-                {m.charts?.slice(0, 2).map((c, j) => <MiniChart key={j} c={c} />)}
-                {m.trace && <Trace steps={m.trace} model={m.model} />}
-              </motion.div>
-            ))}
-            {busy && <div className="text-[14px] text-muted">Calling tools…</div>}
-            <div ref={end} />
           </div>
-          <form onSubmit={(e) => { e.preventDefault(); send(q); }} className="mt-6 flex gap-2">
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={msgs.length ? "Ask a follow-up" : "Ask about any zone; forecasts cover Jan 2025 to Nov 2026"}
-              className="flex-1 rounded-md border border-rule bg-panel px-4 py-3 text-[15px]" aria-label="question" />
-            <button type="submit" disabled={busy} className="rounded-md bg-heat px-5 py-3 text-[15px] font-semibold text-white disabled:opacity-50">Ask</button>
+
+          <form onSubmit={(e) => { e.preventDefault(); send(q); }} className="mx-auto mt-3 flex w-full max-w-[860px] items-end gap-2 rounded-2xl border border-rule bg-panel p-2 shadow-sm focus-within:border-ink">
+            <textarea value={q} onChange={(e) => setQ(e.target.value)} rows={1}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(q); } }}
+              placeholder={msgs.length ? "Ask a follow-up…" : "Ask about any zone, day or scenario…"}
+              className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-3 py-2.5 text-[15px] outline-none focus-visible:outline-none" aria-label="question" />
+            <button type="submit" disabled={busy || !q.trim()} aria-label="Send"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-heat text-white transition-opacity disabled:opacity-40">
+              <ArrowUp size={18} />
+            </button>
           </form>
-        </div>
+          <div className="mt-1.5 text-center text-[11px] text-muted">Enter to send · Shift+Enter for a new line · answers can be wrong; check the numbers badge</div>
+        </section>
       </div>
-    </>
+    </div>
   );
 }
