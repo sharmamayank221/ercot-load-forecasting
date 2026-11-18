@@ -1,0 +1,11 @@
+web/
+app/
+notebooks/
+tests/
+.git/
+.venv/
+**/__pycache__/
+data/raw/
+*.zip
+*.xlsx
+.env

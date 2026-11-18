@@ -12,7 +12,9 @@ from src.config import MODEL_TABLE, OUT_REPORTS, PEAK_TABLE
 from src.agent import tools as T
 
 app = FastAPI(title="ERCOT load forecasting API")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+import os as _os
+_origins = [o.strip() for o in _os.environ.get("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_methods=["*"], allow_headers=["*"])
 ZN = T.ZONE_NAMES
 
 

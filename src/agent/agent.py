@@ -40,6 +40,12 @@ Rules:
 
 def build_llm(model_name=None):
     provider = os.environ.get("LLM_PROVIDER") or ("anthropic" if os.environ.get("ANTHROPIC_API_KEY") else "ollama")
+    if provider == "groq":
+        try:
+            from langchain_groq import ChatGroq
+        except ImportError as e:
+            raise SystemExit("pip install langchain-groq") from e
+        return ChatGroq(model=model_name or os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"), temperature=0)
     if provider == "ollama":
         try:
             from langchain_ollama import ChatOllama
