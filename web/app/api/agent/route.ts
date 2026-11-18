@@ -28,6 +28,10 @@ Rules:
 - Every number you state must come from a tool result in this conversation. Never estimate.
 - For actual historical load use get_load. For hotter/colder scenarios use what_if.
   For whether a day was a high-peak day use peak_risk. For the model's prediction use forecast_load.
+  For rankings of days use top_days; for comparing zones use compare_zones; for model accuracy by
+  zone/season/hour use forecast_errors; for whether the peak alert would have fired use system_alert.
+- Report numbers exactly as the tools give them (you may add thousands separators). Do not do arithmetic
+  on them; if a difference or percentage is needed, use the field the tool provides.
 - MAPE is a percentage error (lower is better). Never call it accuracy.
 - Zones: Coast, East, Far West, North, North Central, South Central, Southern, West.
 - Load data covers 2018 to early Nov 2026; forecasts and what-if cover Jan 2025 to early Nov 2026.
@@ -102,7 +106,8 @@ function makeTools(origin: string) {
         { name: "actual", values: r.actual, kind: "actual" }, { name: "forecast", values: r.forecast, kind: "forecast" },
         { name: "same hour last week", values: r.naive, kind: "naive" }] });
       return { zone: name(k), date, forecast_peak_mw: r.peak_mw, forecast_peak_hour: r.peak_hour, forecast_mean_mw: r.mean_mw,
-        actual_peak_mw: r.actual_peak_mw, day_mape_pct: r.mape_pct, weather: r.weather };
+        actual_peak_mw: r.actual_peak_mw, peak_error_mw: r.peak_mw - r.actual_peak_mw,
+        peak_error_pct: Math.round(((r.peak_mw / r.actual_peak_mw) - 1) * 1000) / 10, day_mape_pct: r.mape_pct, weather: r.weather };
     },
     async what_if({ zone, date, temp_shift_f }) {
       const k = zkey(String(zone));
@@ -125,6 +130,83 @@ function makeTools(origin: string) {
       return { date: d.day, system_peak_mw: Math.round(d.peak_mw), cutoff_mw: Math.round(d.cutoff_mw), high_peak_day: d.high,
         margin_pct: Math.round((d.peak_mw / d.cutoff_mw - 1) * 1000) / 10 };
     },
+    async top_days({ scope, start, end, n, order, months }) {
+      const d = await data<{ days: string[]; system_peak: number[]; tmax_dfw: (number | null)[]; zones: Record<string, { peak: (number | null)[] }> }>("daily.json");
+      const sys = !scope || String(scope).toLowerCase() === "system" || String(scope).toLowerCase() === "ercot";
+      const k = sys ? "" : zkey(String(scope));
+      const vals = sys ? d.system_peak : d.zones[k].peak;
+      const lo = String(start ?? d.days[0]), hi = String(end ?? d.days[d.days.length - 1]);
+      const mset = Array.isArray(months) ? new Set((months as unknown[]).map(Number)) : null;
+      const rows = d.days.map((day, i) => ({ day, peak_mw: vals[i], dfw_temp_high_f: d.tmax_dfw[i] }))
+        .filter((r) => r.peak_mw != null && r.day >= lo && r.day <= hi && (!mset || mset.has(Number(r.day.slice(5, 7)))));
+      if (!rows.length) return { error: "no days match; data covers 2018-01-01 to 2026-11-04" };
+      rows.sort((a, b) => (order === "lowest" ? (a.peak_mw! - b.peak_mw!) : (b.peak_mw! - a.peak_mw!)));
+      const k2 = Math.min(Math.max(Number(n ?? 5), 1), 20);
+      return { scope: sys ? "ERCOT system" : name(k), period: `${lo} to ${hi}`, order: order === "lowest" ? "lowest" : "highest",
+        days_considered: rows.length, days: rows.slice(0, k2) };
+    },
+    async compare_zones({ start, end }) {
+      const d = await data<{ days: string[]; zones: Record<string, { peak: (number | null)[]; mean: (number | null)[] }> }>("daily.json");
+      const lo = String(start), hi = String(end ?? start);
+      const idx = d.days.map((day, i) => [day, i] as const).filter(([day]) => day >= lo && day <= hi);
+      if (!idx.length) return { error: "no days in that range; data covers 2018-01-01 to 2026-11-04" };
+      const out = Object.entries(d.zones).map(([k, z]) => {
+        let best = -Infinity, bestDay = "", sum = 0, cnt = 0;
+        for (const [day, i] of idx) {
+          const p = z.peak[i], m = z.mean[i];
+          if (p != null && p > best) { best = p; bestDay = day; }
+          if (m != null) { sum += m; cnt++; }
+        }
+        return { zone: name(k), peak_mw: best, peak_day: bestDay, average_mw: Math.round(sum / Math.max(cnt, 1)) };
+      }).sort((a, b) => b.peak_mw - a.peak_mw);
+      return { period: `${lo} to ${hi}`, days: idx.length, zones: out };
+    },
+    async forecast_errors({ zone, start, end, by }) {
+      const keys = zone ? [zkey(String(zone))] : Object.values(ZONE_KEYS);
+      const lo = String(start ?? "2025-01-01"), hi = String(end ?? "2026-12-31");
+      const groupBy = ["zone", "month", "season", "hour"].includes(String(by)) ? String(by) : (zone ? "season" : "zone");
+      const season = (m: number) => (m === 12 || m <= 2 ? "winter" : m <= 5 ? "spring" : m <= 8 ? "summer" : "fall");
+      const acc: Record<string, { ape: number; err: number; n: number }> = {};
+      for (const k of keys) {
+        const fc = await data<Record<string, { hour: number[]; forecast: number[]; actual: number[] }>>(`forecast/${k}.json`);
+        for (const [day, r] of Object.entries(fc)) {
+          if (day < lo || day > hi) continue;
+          const m = Number(day.slice(5, 7));
+          r.hour.forEach((h, i) => {
+            const g = groupBy === "zone" ? name(k) : groupBy === "month" ? day.slice(0, 7) : groupBy === "season" ? season(m) : String(h).padStart(2, "0") + ":00";
+            const a = r.actual[i], f = r.forecast[i];
+            if (!a) return;
+            (acc[g] ??= { ape: 0, err: 0, n: 0 });
+            acc[g].ape += Math.abs(f - a) / a; acc[g].err += f - a; acc[g].n++;
+          });
+        }
+      }
+      const groups = Object.entries(acc).map(([g, v]) => ({ [groupBy]: g, mape_pct: Math.round((v.ape / v.n) * 1000) / 10,
+        mean_bias_mw: Math.round(v.err / v.n), hours: v.n }));
+      if (!groups.length) return { error: "no forecasts in that range; forecasts cover 2025-01-01 to 2026-11-04" };
+      if (groupBy === "zone" || groupBy === "season") groups.sort((a, b) => (b.mape_pct as number) - (a.mape_pct as number));
+      return { zones: zone ? name(keys[0]) : "all", period: `${lo} to ${hi}`, grouped_by: groupBy,
+        note: "mean_bias_mw > 0 means the model over-forecasts on average", groups };
+    },
+    async system_alert({ date }) {
+      const day = String(date);
+      const files = await Promise.all(Object.values(ZONE_KEYS).map((k) => data<Record<string, { hour: number[]; forecast: number[]; actual: number[] }>>(`forecast/${k}.json`)));
+      if (!files.every((f) => f[day])) return { error: `no forecast for ${day}; forecasts cover 2025-01-01 to 2026-11-04` };
+      const hours = files[0][day].hour;
+      const fc = hours.map((_, i) => files.reduce((s, f) => s + (f[day].forecast[i] ?? 0), 0));
+      const act = hours.map((_, i) => files.reduce((s, f) => s + (f[day].actual[i] ?? 0), 0));
+      const p = await data<{ days: { day: string; peak_mw: number; cutoff_mw: number; high: boolean }[] }>("peaks.json");
+      const rec = p.days.find((x) => x.day === day);
+      if (!rec) return { error: `no high-peak cutoff recorded for ${day}` };
+      const peak = Math.max(...fc), margin = (peak / rec.cutoff_mw - 1) * 100;
+      const level = margin >= 0 ? "ALERT" : margin >= -3 ? "WATCH" : "NORMAL";
+      charts.push({ title: `ERCOT system, ${day}: forecast vs actual (cutoff ${Math.round(rec.cutoff_mw).toLocaleString("en-US")} MW)`, hours, series: [
+        { name: "actual", values: act, kind: "actual" }, { name: "forecast (sum of zones)", values: fc, kind: "forecast" },
+        { name: "high-peak cutoff", values: hours.map(() => Math.round(rec.cutoff_mw)), kind: "naive" }] });
+      return { date: day, alert_level: level, rule: "ALERT if forecast peak >= cutoff, WATCH if within 3%",
+        forecast_system_peak_mw: Math.round(peak), cutoff_mw: Math.round(rec.cutoff_mw), margin_pct: Math.round(margin * 10) / 10,
+        actual_system_peak_mw: Math.round(Math.max(...act)), actual_high_peak_day: rec.high };
+    },
     async model_card() {
       const m = await data<Json>("meta.json");
       return { model: m.model, forecast_period: `${m.forecast_start} to ${m.forecast_end}`, test_year_leaderboard_mape_pct: m.leaderboard };
@@ -140,9 +222,42 @@ function makeTools(origin: string) {
     ["forecast_load", "The model's day-ahead forecast for a zone and date: forecast peak, actual peak, and the day's error.", S({ zone, date }, ["zone", "date"])],
     ["what_if", "Forecast peak for a zone and date if every hour were warmer or cooler by temp_shift_f °F.", S({ zone, date, temp_shift_f: { type: "number" } }, ["zone", "date", "temp_shift_f"])],
     ["peak_risk", "Whether a date was a high-peak day for the whole ERCOT system, its peak and the cutoff.", S({ date }, ["date"])],
+    ["top_days", "Highest (or lowest) daily peaks for the ERCOT system or one zone in a period, optionally only some months. Use for 'which days', 'record', 'hottest days' questions.", S({ scope: { type: "string", description: "'system' or a zone name" }, start: date, end: date, n: { type: "number", description: "how many days, max 20" }, order: { type: "string", enum: ["highest", "lowest"] }, months: { type: "array", items: { type: "number" }, description: "e.g. [6,7,8] for summer" } }, [])],
+    ["compare_zones", "Peak and average load of all 8 zones over a date or range, sorted by peak.", S({ start: date, end: date }, ["start"])],
+    ["forecast_errors", "Model forecast error (MAPE % and bias in MW) over a period, grouped by zone, month, season or hour. Use for 'where/when is the model worst' questions.", S({ zone, start: date, end: date, by: { type: "string", enum: ["zone", "month", "season", "hour"] } }, [])],
+    ["system_alert", "Would the peak-demand alert have fired on a date: system forecast peak vs the high-peak cutoff, alert level, and what actually happened.", S({ date }, ["date"])],
     ["model_card", "Which model is used and every model's test MAPE.", S({}, [])],
   ].map(([n, d, p]) => ({ type: "function", function: { name: n, description: d, parameters: p } }));
   return { impl, schema, charts };
+}
+
+/**
+ * Grounding check: every number in the answer must match a number in a tool result, tool argument or the
+ * question, allowing for rounding, sign and MW<->GW scaling. Dates and integers 0-10 are skipped (counts,
+ * hours, small labels). Returns the numbers that could not be traced, so the UI can flag them.
+ */
+function grounding(answer: string, sources: unknown[]) {
+  const pool: number[] = [];
+  const collect = (v: unknown) => {
+    if (typeof v === "number") pool.push(v);
+    else if (typeof v === "string") (v.match(/-?\d+(?:\.\d+)?/g) ?? []).forEach((x) => pool.push(Number(x)));
+    else if (Array.isArray(v)) v.forEach(collect);
+    else if (v && typeof v === "object") Object.values(v).forEach(collect);
+  };
+  sources.forEach(collect);
+  const text = answer.replace(/\d{4}-\d{2}-\d{2}/g, " ").replace(/\b\d{1,2}:\d{2}\b/g, " ");
+  const found = [...text.matchAll(/(?<![\w.])-?\d[\d,]*(?:\.\d+)?/g)].map((m) => m[0]);
+  const checked: string[] = [], ungrounded: string[] = [];
+  for (const raw of found) {
+    const x = Number(raw.replace(/,/g, ""));
+    if (!Number.isFinite(x) || (Number.isInteger(x) && Math.abs(x) <= 10)) continue;
+    checked.push(raw);
+    const dec = (raw.split(".")[1] ?? "").length, tol = 0.5 * 10 ** -dec + 1e-9;
+    const ok = pool.some((p) => [p, Math.abs(p), p / 1000, Math.abs(p) / 1000, p * 1000]
+      .some((c) => Math.abs(Math.abs(x) - Math.abs(c)) <= tol * (c === p * 1000 ? 1000 : 1)));
+    if (!ok) ungrounded.push(raw);
+  }
+  return { checked: checked.length, ungrounded };
 }
 
 export async function POST(req: Request) {
@@ -182,7 +297,11 @@ export async function POST(req: Request) {
       }
       const msg = (await r.json()).choices[0].message;
       messages.push(msg);
-      if (!msg.tool_calls?.length) return reply(msg.content ?? "");
+      if (!msg.tool_calls?.length) {
+        const answer = msg.content ?? "";
+        const g = grounding(answer, [question, ...trace.map((t) => t.result), ...trace.map((t) => t.args)]);
+        return Response.json({ answer, tools: used, trace, charts, model: `${llm.provider}: ${llm.model}`, grounding: g });
+      }
       for (const call of msg.tool_calls) {
         const fn = impl[call.function.name];
         let result: Json, args: Json = {};

@@ -123,6 +123,18 @@ def main(start):
         sizes[f"forecast/{key}"] = write(f"forecast/{key}.json", fc)
         sizes[f"whatif/{key}"] = write(f"whatif/{key}.json", wi)
 
+    # daily.json: one row per day, system and zone peaks, for top_days / compare_zones tools
+    tb = table.assign(day=table.timestamp.dt.date.astype(str))
+    sysd = tb[tb.zone == "northC"].groupby("day").agg(system_peak=("system_total_mw", "max"), tmax_dfw=("temp_f", "max"))
+    zp = tb.pivot_table(index="day", columns="zone", values="load_mw", aggfunc=["max", "mean"])
+    alldays = sysd.index.tolist()
+    sizes["daily"] = write("daily.json", {
+        "days": alldays,
+        "system_peak": sysd.system_peak.round().astype(int).tolist(),
+        "tmax_dfw": sysd.tmax_dfw.astype("float64").round(1).tolist(),
+        "zones": {k: {"peak": zp["max"][k].reindex(alldays).round().astype("Int64").tolist(),
+                      "mean": zp["mean"][k].reindex(alldays).round().astype("Int64").tolist()} for k in T.ZONE_NAMES}})
+
     days = sorted(fc)
     lb = A.summary()["leaderboard"]
     sizes["meta"] = write("meta.json", {

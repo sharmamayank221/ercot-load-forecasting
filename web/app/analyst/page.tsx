@@ -9,15 +9,30 @@ import { PageTitle } from "@/components/ui";
 
 type Chart = { title: string; hours: number[]; series: { name: string; values: number[]; kind: "actual" | "forecast" | "alt" | "naive" }[] };
 type Step = { tool: string; args: Record<string, unknown>; result: Record<string, unknown> };
-type Reply = { answer: string; tools: string[]; trace?: Step[]; charts?: Chart[]; model?: string };
-type Msg = { role: "user" | "assistant"; text: string; tools?: string[]; trace?: Step[]; charts?: Chart[]; model?: string };
+type Grounding = { checked: number; ungrounded: string[] };
+type Reply = { answer: string; tools: string[]; trace?: Step[]; charts?: Chart[]; model?: string; grounding?: Grounding };
+type Msg = { role: "user" | "assistant"; text: string; tools?: string[]; trace?: Step[]; charts?: Chart[]; model?: string; grounding?: Grounding };
+
+function GroundingBadge({ g }: { g: Grounding }) {
+  if (!g.checked) return null;
+  const ok = g.ungrounded.length === 0;
+  return (
+    <div className="mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1 text-[12px]"
+      style={{ background: ok ? "rgba(31,158,150,0.12)" : "var(--heat-soft)", color: ok ? "#14706a" : "#a8441c" }}
+      title="Every number in the answer is checked against the tool results, allowing for rounding and MW/GW.">
+      {ok ? `✓ all ${g.checked} number${g.checked > 1 ? "s" : ""} traced to tool results`
+        : `⚠ ${g.ungrounded.length} of ${g.checked} number${g.checked > 1 ? "s" : ""} not found in tool results: ${g.ungrounded.join(", ")}`}
+    </div>
+  );
+}
 
 const starters = [
+  "What were the 5 highest-demand days for the ERCOT system in 2026?",
+  "Where is the model least accurate, by zone?",
+  "Would the peak alert have fired on 2026-08-18?",
+  "Compare all zones on 2026-07-22.",
   "What was the North Central peak on 2026-07-22?",
-  "How far off was the forecast that day?",
   "What happens to Coast load on 2026-08-15 if it is 6 degrees hotter?",
-  "Was 2026-07-22 a high-peak day?",
-  "Compare the forecast error for Coast and West on 2026-02-14.",
 ];
 
 const STYLE: Record<Chart["series"][number]["kind"], { color: string; width: number; dash?: string }> = {
@@ -93,7 +108,7 @@ export default function Analyst() {
     setMsgs((m) => [...m, { role: "user", text }]); setQ(""); setBusy(true);
     try {
       const r = await post<Reply>("/api/agent", { question: text, history });
-      setMsgs((m) => [...m, { role: "assistant", text: r.answer, tools: r.tools, trace: r.trace, charts: r.charts, model: r.model }]);
+      setMsgs((m) => [...m, { role: "assistant", text: r.answer, tools: r.tools, trace: r.trace, charts: r.charts, model: r.model, grounding: r.grounding }]);
     } catch (e) {
       setMsgs((m) => [...m, { role: "assistant", text: `Could not reach the agent: ${(e as Error).message}` }]);
     } finally { setBusy(false); }
@@ -113,6 +128,7 @@ export default function Analyst() {
             className={m.role === "user" ? "max-w-[70ch] self-end rounded-lg bg-ink px-4 py-3 text-[15px] text-paper"
               : "w-full max-w-[80ch] rounded-lg border border-rule bg-panel px-4 py-3 text-[15px] leading-relaxed"}>
             {m.role === "user" ? m.text : <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>{m.text}</ReactMarkdown>}
+            {m.grounding && <GroundingBadge g={m.grounding} />}
             {m.charts?.slice(0, 2).map((c, j) => <MiniChart key={j} c={c} />)}
             {m.trace && <Trace steps={m.trace} model={m.model} />}
           </motion.div>
