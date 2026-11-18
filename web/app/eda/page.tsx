@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, ReferenceArea, Cell } from "recharts";
 import { get, fmt } from "@/lib/api";
 import { PageTitle, Section, Stat, ErrorNote, Loading } from "@/components/ui";
+import { ZoneBoxes, CorrMatrix, ACFChart, HourScatter, WeekChart, type ZoneBox } from "@/components/eda";
 
 type E = {
   facts: { rows: number; hours: number; zones: number; start: string; end: string; missing_temp_pct: number; archive_rows: number; api_rows: number; uri_hours: number };
@@ -11,6 +12,9 @@ type E = {
   zone_growth: Record<string, number>[]; corr: { feature: string; r: number }[];
   uri: { t: string; mw: number; temp_f: number; shed: boolean }[];
   quality: { missing_hours: number; temp_outliers_fixed: number; archive_api_gap_pct: number; zones_missing_temp: Record<string, number> };
+  skew: number; zone_box: ZoneBox[]; corr_matrix: { cols: string[]; r: number[][] }; acf: { lag: number; r: number }[];
+  record_week: { t: string; mw: number; temp_f: number }[]; summer_hours: { temp_f: number; mw: number; hour: number }[];
+  missing_by_date: { date: string; hours: number }[];
 };
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const ZONE_COLORS: Record<string, string> = { "North Central": "#1c5ba6", Coast: "#e6612a", "South Central": "#1f9e96", "Far West": "#8a5a2b", Southern: "#7b6cd9", East: "#9aa6b2", West: "#c9a227", North: "#d4668f" };
@@ -51,7 +55,11 @@ export default function EDA() {
             </AreaChart>
           </ResponsiveContainer>
         </div>
-        <p className="mt-2 max-w-[70ch] text-[14px] text-muted">Two humps: a broad one for mild-weather hours around 40 to 50 GW, and a long summer tail stretching past 80 GW. The models have to be good at both.</p>
+        <p className="mt-2 max-w-[70ch] text-[14px] text-muted">Two humps: a broad one for mild-weather hours around 40 to 50 GW, and a long summer tail stretching past 80 GW (skew {e.skew.toFixed(2)}). The models have to be good at both.</p>
+      </Section>
+
+      <Section title="Each zone has its own scale" aside="hourly load by zone, all years">
+        <ZoneBoxes rows={e.zone_box} />
       </Section>
 
       <div className="grid gap-x-10 md:grid-cols-2">
@@ -106,6 +114,16 @@ export default function EDA() {
       </Section>
 
       <div className="grid gap-x-10 md:grid-cols-2">
+        <div><Section title="Hot afternoons, not just hot days" aside="North Central, summer hours">
+          <HourScatter points={e.summer_hours} />
+          <p className="mt-2 text-[14px] text-muted">At the same temperature, late-afternoon hours (orange) draw more power than nights (blue): the clock and the weather work together, which is why the model gets both.</p>
+        </Section></div>
+        <div><Section title="Every pair of drivers" aside="Pearson r, North Central">
+          <CorrMatrix cols={e.corr_matrix.cols} r={e.corr_matrix.r} />
+        </Section></div>
+      </div>
+
+      <div className="grid gap-x-10 md:grid-cols-2">
         <div><Section title="Which zones are growing" aside="average load by zone and year">
           <div className="h-72">
             <ResponsiveContainer>
@@ -138,6 +156,16 @@ export default function EDA() {
         </Section></div>
       </div>
 
+      <Section title="Yesterday and last week predict today" aside="autocorrelation of system load, 1 hour to 8 days">
+        <ACFChart data={e.acf} />
+        <p className="mt-2 max-w-[70ch] text-[14px] text-muted">Load is most like the same hour yesterday (r ≈ 0.96), then two days back (0.91) and the same hour last week (0.87), which also carries the weekday pattern. The model uses the 48 h and 168 h lags, because yesterday’s full day is not yet known when a day-ahead forecast is issued.</p>
+      </Section>
+
+      <Section title="The record week, July 2026" aside="system load and DFW temperature">
+        <WeekChart points={e.record_week} />
+        <p className="mt-2 max-w-[70ch] text-[14px] text-muted">Three days at or above 100°F in a row (July 20 to 22) pushed the daily peak up each afternoon, from 82.7 GW on the 19th to the all-time record of 91.1 GW on the 22nd, then it eased as temperatures dropped. Heat that builds over days matters more than one hot afternoon, which is what the 24 h and 72 h temperature averages capture.</p>
+      </Section>
+
       <Section title="Winter Storm Uri, February 2021" aside="why one week is excluded from training">
         <div className="h-72">
           <ResponsiveContainer>
@@ -163,6 +191,26 @@ export default function EDA() {
           <div className="flex justify-between border-b border-rule pb-2"><dt className="text-muted">API versus settled archive load</dt><dd className="num font-semibold">API runs {e.quality.archive_api_gap_pct}% higher; archive used where it exists</dd></div>
           <div className="flex justify-between border-b border-rule pb-2"><dt className="text-muted">Stations with temperature gaps</dt><dd className="num font-semibold">{Object.entries(e.quality.zones_missing_temp).map(([z, n]) => `${z} ${n} h`).join(", ")}</dd></div>
         </dl>
+        <div className="mt-8 grid gap-10 md:grid-cols-2">
+          <div>
+            <div className="mb-2 text-[13px] text-muted">Missing hours by date (a single hour in March is the clock change)</div>
+            <table className="w-full text-[14px]"><tbody>
+              {e.missing_by_date.map((m) => (
+                <tr key={m.date} className="border-t border-rule"><td className="py-1.5">{m.date}</td>
+                  <td className="num text-right font-semibold" style={{ color: m.hours > 1 ? "var(--heat)" : "var(--ink)" }}>{m.hours} h</td></tr>
+              ))}
+            </tbody></table>
+          </div>
+          <div>
+            <div className="mb-2 text-[13px] text-muted">Temperature range seen at each zone's station</div>
+            <table className="w-full text-[14px]"><tbody>
+              {[...e.zone_box].sort((a, b) => a.temp_min - b.temp_min).map((z) => (
+                <tr key={z.zone} className="border-t border-rule"><td className="py-1.5">{z.zone}</td>
+                  <td className="num text-right">{z.temp_min.toFixed(0)}°F to {z.temp_max.toFixed(0)}°F</td></tr>
+              ))}
+            </tbody></table>
+          </div>
+        </div>
       </Section>
     </>
   );

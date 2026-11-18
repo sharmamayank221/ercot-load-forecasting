@@ -205,5 +205,32 @@ def _eda():
     missing_hours = int(len(full.difference(s.index)))
     quality = {"missing_hours": missing_hours, "temp_outliers_fixed": 10, "archive_api_gap_pct": 0.7,
                "zones_missing_temp": {ZN[z]: int(v) for z, v in df.groupby("zone").temp.apply(lambda x: x.isna().sum()).items() if v > 0}}
+    # 10 load spread and growth by zone (box plot data)
+    zone_box = []
+    for z, g in df.groupby("zone"):
+        q = g.load_mw.quantile([0, .05, .25, .5, .75, .95, 1]).tolist()
+        yr = g.groupby(g.timestamp.dt.year).load_mw.mean()
+        zone_box.append({"zone": ZN[z], "p0": q[0], "p5": q[1], "p25": q[2], "p50": q[3], "p75": q[4], "p95": q[5], "p100": q[6],
+                         "growth_pct": float((yr.iloc[-1] / yr.iloc[0] - 1) * 100),
+                         "temp_min": float(g.temp_f.min()), "temp_max": float(g.temp_f.max())})
+    # 11 full correlation matrix, North Central
+    nc["month"] = nc.timestamp.dt.month
+    mcols = ["load_mw", "temp_f", "cdh", "hdh", "dwpt", "rhum", "wspd", "prcp", "hour", "dow", "month"]
+    cm = nc[mcols].astype("float64").corr()
+    corr_matrix = {"cols": mcols, "r": [[float(v) for v in row] for row in cm.to_numpy()]}
+    # 12 autocorrelation of system load, 1 h to 8 days
+    acf = [{"lag": k, "r": float(s.autocorr(k))} for k in range(1, 193)]
+    # 13 record week, July 2026
+    rw = sysd["2026-07-19":"2026-07-26"]
+    record_week = [{"t": ts.isoformat(), "mw": float(m), "temp_f": float(t)}
+                   for ts, m, t in zip(rw.index, rw.system_total_mw, rw.temp_f.astype("float64"))]
+    # 14 summer hours coloured by hour of day, North Central
+    sm = nc[nc.timestamp.dt.month.isin([6, 7, 8])].dropna(subset=["temp_f"]).sample(3000, random_state=1)
+    summer_hours = [{"temp_f": float(t), "mw": float(m), "hour": int(h)} for t, m, h in zip(sm.temp_f, sm.load_mw, sm.hour)]
+    # 15 missing hours by date
+    miss = pd.Series(full.difference(s.index))
+    missing_by_date = [{"date": str(d), "hours": int(n)} for d, n in miss.dt.date.value_counts().sort_index().items()]
     return {"facts": facts, "dist": dist, "monthly": monthly, "profile": profile, "response": resp,
-            "zone_growth": zone_growth, "corr": corr, "uri": uri_pts, "quality": quality}
+            "zone_growth": zone_growth, "corr": corr, "uri": uri_pts, "quality": quality,
+            "skew": float(s.skew()), "zone_box": zone_box, "corr_matrix": corr_matrix, "acf": acf,
+            "record_week": record_week, "summer_hours": summer_hours, "missing_by_date": missing_by_date}
