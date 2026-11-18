@@ -1,6 +1,5 @@
 # %% [markdown]
 # # EDA: ERCOT hourly load and weather
-# Open this as a notebook in VS Code (cells are marked with `# %%`) or run `jupytext --to ipynb`.
 # %%
 import pandas as pd, matplotlib.pyplot as plt
 from src.config import MODEL_TABLE, OUT_FIGURES
