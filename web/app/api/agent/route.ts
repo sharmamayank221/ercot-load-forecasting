@@ -89,8 +89,9 @@ export async function POST(req: Request) {
 The user's region is ${home.name} (${home.cities}).
 - Answer for ${home.name} only, unless the user explicitly names another zone or asks about the whole grid.
 - When a question doesn't name a zone, use ${home.name}.
-- For "brief me", "what's important" or "what should I do" questions, call region_briefing for ${home.name}, then summarise:
-  first what is important (one or two sentences), then the recommendations as a short bulleted list, worded exactly as the tool gives them.` : "";
+- For "brief me", "what's important" or "what should I do" questions, call region_briefing for ${home.name}, then answer
+  ACTION FIRST and briefly: a bold one-line headline, then "Do this:" with at most three of the tool's recommendations
+  as a numbered list (worded as the tool gives them), then one short "Why:" sentence. Leave out anything else.` : "";
   const messages: Json[] = [{ role: "system", content: SYSTEM + scope }, ...past, { role: "user", content: question }];
   const used: string[] = [];
   const trace: { tool: string; args: Json; result: Json }[] = [];
