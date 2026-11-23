@@ -10,6 +10,7 @@
  * Choose with LLM_PROVIDER=ollama|groq; if unset: groq when GROQ_API_KEY exists, else ollama.
  */
 import { ZONE_KEYS } from "@/lib/api";
+import { regionByKey } from "@/lib/region";
 
 export const maxDuration = 30;
 
@@ -207,6 +208,60 @@ function makeTools(origin: string) {
         forecast_system_peak_mw: Math.round(peak), cutoff_mw: Math.round(rec.cutoff_mw), margin_pct: Math.round(margin * 10) / 10,
         actual_system_peak_mw: Math.round(Math.max(...act)), actual_high_peak_day: rec.high };
     },
+    async region_briefing({ zone, date }) {
+      const k = zkey(String(zone));
+      const day = String(date);
+      const fc = await data<Record<string, DayRec>>(`forecast/${k}.json`);
+      const r = fc[day];
+      if (!r) return { error: `no forecast for ${day}; briefings cover 2025-01-01 to 2026-11-04` };
+      // 1. the region's own forecast and its usual level for this month (same month, previous two years)
+      const d = await data<{ days: string[]; zones: Record<string, { peak: (number | null)[] }> }>("daily.json");
+      const y = Number(day.slice(0, 4)), m = day.slice(5, 7);
+      const same = d.days.map((dd, i) => [dd, d.zones[k].peak[i]] as const)
+        .filter(([dd, v]) => v != null && dd.slice(5, 7) === m && Number(dd.slice(0, 4)) >= y - 2 && Number(dd.slice(0, 4)) < y)
+        .map(([, v]) => v as number).sort((a, b) => a - b);
+      const typical = same.length ? same[Math.floor(same.length / 2)] : null;
+      const vsTypical = typical ? Math.round(((r.peak_mw / typical) - 1) * 1000) / 10 : null;
+      // 2. hours within 5% of the forecast peak = the window to avoid
+      // flat days (winter) put most hours near the peak: then use the few hours around the peak instead
+      const fmtH = (h: number) => (h % 24 === 0 ? "midnight" : h === 12 ? "noon" : h < 12 ? `${h} am` : `${h - 12} pm`);
+      const near = r.hour.filter((_, i) => r.forecast[i] >= 0.97 * r.peak_mw);
+      let w0 = Math.min(...near), w1 = Math.max(...near) + 1;
+      if (!near.length || w1 - w0 > 6) { w0 = Math.max(r.peak_hour - 1, 0); w1 = Math.min(r.peak_hour + 2, 24); }
+      const window = `${fmtH(w0)} to ${fmtH(w1)}`;
+      // 3. whole-grid alert level (grid stress is system-wide even when the user cares about one region)
+      const n = charts.length;
+      const sa = await impl.system_alert({ date: day });
+      charts.length = n;                                   // keep the region chart, not the system one
+      const level = (sa.alert_level as string) ?? "UNKNOWN";
+      const t = (r.weather as { temp_high_f: number; temp_low_f: number });
+      // 4. what matters, and what to do: fixed rules, so the advice is consistent and checkable
+      const important: string[] = [];
+      const advice: string[] = [];
+      if (level === "ALERT") {
+        important.push(`The ERCOT grid is forecast to cross its high-peak threshold (${sa.margin_pct}% above the cutoff).`);
+        advice.push(`Shift laundry, dishwashing and EV charging out of ${window}.`);
+        if (t.temp_high_f >= 85) advice.push(`Pre-cool the home before ${fmtH(w0)}, then raise the thermostat 2 to 3 °F until ${fmtH(w1)}.`);
+        else if (t.temp_low_f <= 40) advice.push(`Pre-heat the home before ${fmtH(w0)}, then lower the thermostat 2 to 3 °F until ${fmtH(w1)}.`);
+        advice.push("Watch for ERCOT conservation appeals.");
+      } else if (level === "WATCH") {
+        const gap = Math.abs(Number(sa.margin_pct));
+        important.push(gap < 0.5 ? "Grid demand is forecast just below the high-peak threshold."
+          : `Grid demand is forecast within ${gap}% of the high-peak threshold.`);
+        advice.push(`If you can, move flexible electricity use out of ${window}.`);
+      } else {
+        advice.push("No grid stress expected: normal electricity use is fine.");
+      }
+      if (vsTypical != null && vsTypical >= 10) important.push(`${name(k)}'s forecast peak is ${vsTypical}% above a typical day this month.`);
+      if (t.temp_high_f >= 100) { important.push(`Extreme heat: a high of ${t.temp_high_f} °F.`); advice.push("Limit outdoor activity in the afternoon and check on vulnerable neighbours."); }
+      if (t.temp_low_f <= 32) { important.push(`Freezing temperatures: a low of ${t.temp_low_f} °F.`); advice.push(`Protect exposed pipes. Demand in ${name(k)} peaks around ${fmtH(r.peak_hour)}, so run heavy appliances outside ${window}.`); }
+      if (!important.length) important.push("Nothing unusual is expected in this region.");
+      charts.push({ title: `${name(k)}, ${day}: forecast load`, hours: r.hour, series: [{ name: "forecast", values: r.forecast, kind: "forecast" }] });
+      return { region: name(k), date: day, grid_alert_level: level, forecast_peak_mw: r.peak_mw, peak_hour: r.peak_hour,
+        peak_window: window, typical_peak_this_month_mw: typical, vs_typical_pct: vsTypical,
+        temp_high_f: t.temp_high_f, temp_low_f: t.temp_low_f, important, recommendations: advice,
+        actual_peak_mw: r.actual_peak_mw, note: "recommendations are generated by fixed rules from these numbers" };
+    },
     async model_card() {
       const m = await data<Json>("meta.json");
       return { model: m.model, forecast_period: `${m.forecast_start} to ${m.forecast_end}`, test_year_leaderboard_mape_pct: m.leaderboard };
@@ -226,6 +281,7 @@ function makeTools(origin: string) {
     ["compare_zones", "Peak and average load of all 8 zones over a date or range, sorted by peak.", S({ start: date, end: date }, ["start"])],
     ["forecast_errors", "Model forecast error (MAPE % and bias in MW) over a period, grouped by zone, month, season or hour. Use for 'where/when is the model worst' questions.", S({ zone, start: date, end: date, by: { type: "string", enum: ["zone", "month", "season", "hour"] } }, [])],
     ["system_alert", "Would the peak-demand alert have fired on a date: system forecast peak vs the high-peak cutoff, alert level, and what actually happened.", S({ date }, ["date"])],
+    ["region_briefing", "Briefing for one region and date: what is important there (grid alert, unusual demand, extreme temperatures) and recommendations for residents. Use for 'brief me', 'what should I know', 'what should I do' questions.", S({ zone, date }, ["zone", "date"])],
     ["model_card", "Which model is used and every model's test MAPE.", S({}, [])],
   ].map(([n, d, p]) => ({ type: "function", function: { name: n, description: d, parameters: p } }));
   return { impl, schema, charts };
@@ -261,7 +317,8 @@ function grounding(answer: string, sources: unknown[]) {
 }
 
 export async function POST(req: Request) {
-  const { question, history } = (await req.json().catch(() => ({}))) as { question?: string; history?: { role: string; text: string }[] };
+  const { question, history, region } = (await req.json().catch(() => ({}))) as { question?: string; history?: { role: string; text: string }[]; region?: string };
+  const home = regionByKey(region);
   if (!question?.trim()) return Response.json({ answer: "Ask a question.", tools: [] });
   const llm = llmConfig();
   if (llm.provider === "groq" && !llm.key) {
@@ -271,7 +328,14 @@ export async function POST(req: Request) {
   // last few turns, so follow-ups like "what about Coast?" work; only text, never old tool output
   const past = (history ?? []).slice(-6).filter((m) => m.role === "user" || m.role === "assistant")
     .map((m) => ({ role: m.role, content: String(m.text).slice(0, 1500) }));
-  const messages: Json[] = [{ role: "system", content: SYSTEM }, ...past, { role: "user", content: question }];
+  const scope = home ? `
+
+The user's region is ${home.name} (${home.cities}).
+- Answer for ${home.name} only, unless the user explicitly names another zone or asks about the whole grid.
+- When a question doesn't name a zone, use ${home.name}.
+- For "brief me", "what's important" or "what should I do" questions, call region_briefing for ${home.name}, then summarise:
+  first what is important (one or two sentences), then the recommendations as a short bulleted list, worded exactly as the tool gives them.` : "";
+  const messages: Json[] = [{ role: "system", content: SYSTEM + scope }, ...past, { role: "user", content: question }];
   const used: string[] = [];
   const trace: { tool: string; args: Json; result: Json }[] = [];
   const reply = (answer: string) => Response.json({ answer, tools: used, trace, charts, model: `${llm.provider}: ${llm.model}` });

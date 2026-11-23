@@ -20,6 +20,7 @@ Settings in .env (never commit it):
   ALERT_TO=you@gmail.com                  # comma-separated; recipients come only from here
   ALERT_USE_LLM=0                         # 1 = local agent (Ollama) writes the summary sentence
   ALERT_WATCH_PCT=3                       # WATCH when the forecast is within 3% of the cutoff
+  ALERT_ZONE=North Central                # optional: email only this region's details (or pass --zone)
 
 Note: forecasts need that day's features (weather + load lags) in the feature table, so today
 this works for any date already in the data (a "replay"). A live "tomorrow" alert needs a
@@ -108,11 +109,23 @@ def summary_sentence(a):
         return text
 
 
-def build_email(a):
+def build_email(a, zone=None):
+    """zone: if set, the email covers that region only (plus the grid-wide alert level, which is system-wide)."""
     level = a["level"]
+    if zone:
+        a = {**a, "zones": [z for z in a["zones"] if z["zone"].lower() == zone.lower()]}
+        if not a["zones"]:
+            raise SystemExit(f"unknown zone {zone!r}; use one of: {', '.join(ZONES)}")
     subj = (f"[ERCOT {level}] {a['date']}: forecast peak {a['peak_mw']:,.0f} MW "
             f"({a['margin_pct']:+.1f}% vs cutoff)")
+    if zone:
+        z = a["zones"][0]
+        subj = f"[ERCOT {level}] {a['date']} · {z['zone']}: peak {z['peak_mw']:,} MW at {z['peak_hour']}:00"
     lines = [summary_sentence(a), ""]
+    if zone:
+        z = a["zones"][0]
+        lines += [f"Your region, {z['zone']}: forecast peak {z['peak_mw']:,} MW around {z['peak_hour']}:00, "
+                  f"high of {z['temp_high_f']:.0f}°F.", ""]
     if a["actual_peak_mw"]:
         lines.append(f"Replay of a past day: the actual peak was {a['actual_peak_mw']:,.0f} MW"
                      + (f"; it {'was' if a['actual_high_peak'] else 'was not'} a high-peak day."
@@ -191,12 +204,13 @@ if __name__ == "__main__":
     ap.add_argument("--send", action="store_true", help="actually send (default: print only)")
     ap.add_argument("--always", action="store_true", help="send even when the level is NORMAL")
     ap.add_argument("--backtest", nargs=2, metavar=("START", "END"))
+    ap.add_argument("--zone", default=os.environ.get("ALERT_ZONE"), help="email only this region, e.g. 'North Central'")
     args = ap.parse_args()
     if args.backtest:
         backtest(*args.backtest)
     elif args.date:
         a = assess(args.date)
-        subject, body, html = build_email(a)
+        subject, body, html = build_email(a, args.zone)
         print(subject, "\n", "-" * len(subject), "\n", body, sep="")
         if args.send and (a["level"] != "NORMAL" or args.always):
             send(subject, body, html)

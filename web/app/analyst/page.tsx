@@ -5,7 +5,9 @@ import { ArrowUp, Info, MessageSquare, Plus, Trash2, Zap } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { post, fmt } from "@/lib/api";
+import { post, fmt, loadJSON, type Meta } from "@/lib/api";
+import { loadRegion, saveRegion, type Region } from "@/lib/region";
+import RegionPicker from "@/components/RegionPicker";
 
 type Chart = { title: string; hours: number[]; series: { name: string; values: number[]; kind: "actual" | "forecast" | "alt" | "naive" }[] };
 type Step = { tool: string; args: Record<string, unknown>; result: Record<string, unknown> };
@@ -33,6 +35,13 @@ const starters = [
   "Compare all zones on 2026-07-22.",
   "What was the North Central peak on 2026-07-22?",
   "What happens to Coast load on 2026-08-15 if it is 6 degrees hotter?",
+];
+
+const regionStarters = (z: string) => [
+  `What was the highest-demand day in ${z} in 2026?`,
+  `How accurate is the forecast for ${z}, by season?`,
+  `What happens in ${z} on 2026-08-15 if it is 6 degrees hotter?`,
+  "Would the grid alert have fired on 2026-08-18?",
 ];
 
 const STYLE: Record<Chart["series"][number]["kind"], { color: string; width: number; dash?: string }> = {
@@ -170,7 +179,13 @@ export default function Analyst() {
   const [busy, setBusy] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { setChats(loadChats()); setLoaded(true); }, []);
+  const [region, setRegionState] = useState<Region | null>(null);
+  const [briefDate, setBriefDate] = useState("2026-08-18");
+  const [range, setRange] = useState<{ start: string; end: string }>({ start: "2025-01-01", end: "2026-11-04" });
+  const setRegion = (r: Region | null) => { setRegionState(r); saveRegion(r); };
+
+  useEffect(() => { setChats(loadChats()); setRegionState(loadRegion()); setLoaded(true); }, []);
+  useEffect(() => { loadJSON<Meta>("meta.json").then((m) => setRange({ start: m.forecast_start, end: m.forecast_end })).catch(() => {}); }, []);
   useEffect(() => { if (loaded) saveChats(chats); }, [chats, loaded]);
 
   const current = chats.find((c) => c.id === active) ?? null;
@@ -197,7 +212,7 @@ export default function Analyst() {
     push(id, { role: "user", text }, text.length > 60 ? text.slice(0, 57) + "…" : text);
     setQ(""); setBusy(true);
     try {
-      const r = await post<Reply>("/api/agent", { question: text, history });
+      const r = await post<Reply>("/api/agent", { question: text, history, region: region?.key });
       push(id, { role: "assistant", text: r.answer, tools: r.tools, trace: r.trace, charts: r.charts, model: r.model, grounding: r.grounding });
     } catch (e) {
       push(id, { role: "assistant", text: `Could not reach the agent: ${(e as Error).message}` });
@@ -217,14 +232,18 @@ export default function Analyst() {
           <h1 className="text-[26px] font-extrabold leading-none tracking-tight">Ask the grid analyst</h1>
           <p className="mt-2 text-[14px] text-muted">Questions about ERCOT demand, answered from the project&apos;s data and models.</p>
         </div>
+        <div className="flex items-start gap-5">
+        <RegionPicker region={region} onChange={setRegion} />
         <details className="relative text-[13px]">
           <summary className="flex cursor-pointer list-none items-center gap-1 text-muted hover:text-ink"><Info size={15} /> How it works</summary>
           <div className="absolute right-0 z-10 mt-2 w-80 rounded-md border border-rule bg-panel p-4 leading-relaxed shadow-lg">
             The model answers only by calling tools over the project&apos;s data: load history, weather, forecasts,
             what-if scenarios, rankings, error breakdowns and the peak alert. Every number is checked against the tool
-            results (the badge under each answer), and &ldquo;How I got this&rdquo; shows each call. Chats are saved in this browser only.
+            results (the badge under each answer), and &ldquo;How I got this&rdquo; shows each call. With a region set, answers
+            cover your region only unless you ask about another. Chats and your region are saved in this browser only.
           </div>
         </details>
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1 gap-6">
@@ -236,10 +255,26 @@ export default function Analyst() {
             {msgs.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center text-center">
                 <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-heat-soft"><Zap size={20} className="text-heat" /></div>
-                <div className="text-[18px] font-semibold">What would you like to know?</div>
-                <p className="mt-1 max-w-[52ch] text-[14px] text-muted">Data covers 2018 to Nov 2026; forecasts and what-if scenarios cover Jan 2025 to Nov 2026. Try one of these:</p>
-                <div className="mt-5 grid w-full max-w-[720px] gap-2 sm:grid-cols-2">
-                  {starters.map((st) => (
+                <div className="text-[18px] font-semibold">{region ? `What's happening in ${region.name}?` : "What would you like to know?"}</div>
+                <p className="mt-1 max-w-[56ch] text-[14px] text-muted">{region
+                  ? `Answers cover ${region.name} (${region.cities}) unless you ask about another region.`
+                  : "Set your region (top right) to get briefings and answers for your area only. Data covers 2018 to Nov 2026."}</p>
+                {region && (
+                  <div className="mt-5 flex w-full max-w-[720px] flex-wrap items-center justify-between gap-3 rounded-lg border border-heat bg-heat-soft/50 px-5 py-4 text-left">
+                    <div>
+                      <div className="text-[15px] font-semibold">Regional briefing</div>
+                      <div className="text-[13px] text-muted">What&apos;s important in {region.name} that day, and what to do about it.</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input type="date" value={briefDate} min={range.start} max={range.end} onChange={(e) => setBriefDate(e.target.value)}
+                        aria-label="Briefing date" className="rounded-md border border-rule bg-panel px-2 py-1.5 text-[14px]" />
+                      <button onClick={() => send(`Brief me on ${region.name} for ${briefDate}: what's important and what should I do?`)}
+                        className="rounded-md bg-heat px-4 py-2 text-[14px] font-semibold text-white">Brief me</button>
+                    </div>
+                  </div>
+                )}
+                <div className="mt-4 grid w-full max-w-[720px] gap-2 sm:grid-cols-2">
+                  {(region ? regionStarters(region.name) : starters).map((st) => (
                     <button key={st} onClick={() => send(st)}
                       className="rounded-lg border border-rule bg-panel px-4 py-3 text-left text-[14px] transition-colors hover:border-ink">{st}</button>
                   ))}
