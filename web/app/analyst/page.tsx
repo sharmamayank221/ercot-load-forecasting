@@ -1,12 +1,12 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowUp, Info, MessageSquare, Plus, Trash2, Zap } from "lucide-react";
+import { ArrowUp, Info, Mail, MessageSquare, Plus, Trash2, Zap } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { post, fmt, loadJSON, type Meta } from "@/lib/api";
-import { loadRegion, saveRegion, type Region } from "@/lib/region";
+import { REGIONS, loadRegion, saveRegion, type Region } from "@/lib/region";
 import RegionPicker from "@/components/RegionPicker";
 
 type Chart = { title: string; hours: number[]; series: { name: string; values: number[]; kind: "actual" | "forecast" | "alt" | "naive" }[] };
@@ -36,6 +36,44 @@ const starters = [
   "What was the North Central peak on 2026-07-22?",
   "What happens to Coast load on 2026-08-15 if it is 6 degrees hotter?",
 ];
+
+/** "Email this briefing": shown under answers that used region_briefing. The server rebuilds the briefing
+ *  from the same zone and date, so the email carries the tool's numbers, not the model's wording. */
+function EmailBriefing({ zone, date }: { zone: string; date: string }) {
+  const [to, setTo] = useState("");
+  const [state, setState] = useState<{ kind: "idle" | "sending" | "ok" | "err"; msg?: string }>({ kind: "idle" });
+  useEffect(() => { try { setTo(localStorage.getItem("ercot-brief-email") ?? ""); } catch { /* ignore */ } }, []);
+  async function sendMail(e: React.FormEvent) {
+    e.preventDefault();
+    if (!to.trim()) return;
+    setState({ kind: "sending" });
+    try {
+      const r = await fetch("/api/brief-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ zone, date, to: to.trim() }) });
+      const j = await r.json();
+      if (j.ok) { setState({ kind: "ok", msg: `Sent to ${j.to}.` }); try { localStorage.setItem("ercot-brief-email", to.trim()); } catch { /* ignore */ } }
+      else setState({ kind: "err", msg: j.error ?? "Could not send." });
+    } catch (err) { setState({ kind: "err", msg: (err as Error).message }); }
+  }
+  return (
+    <form onSubmit={sendMail} className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-rule bg-paper px-3 py-2 text-[13px]">
+      <Mail size={15} className="text-muted" />
+      <span className="text-muted">Email this briefing to</span>
+      <input type="email" value={to} onChange={(e) => setTo(e.target.value)} placeholder="name@mavs.uta.edu" aria-label="Email address"
+        className="min-w-[200px] flex-1 rounded border border-rule bg-panel px-2 py-1 text-[13px]" />
+      <button type="submit" aria-label="Send briefing email" disabled={state.kind === "sending" || !to.trim()}
+        className="rounded bg-ink px-3 py-1 font-semibold text-paper disabled:opacity-40">{state.kind === "sending" ? "Sending…" : "Send"}</button>
+      {state.msg && <span className="w-full" style={{ color: state.kind === "ok" ? "#14706a" : "#a8441c" }}>{state.msg}</span>}
+    </form>
+  );
+}
+
+/** The zone and date of the last successful region_briefing call in an answer, if any. */
+function briefingOf(trace?: Step[]) {
+  const b = [...(trace ?? [])].reverse().find((t) => t.tool === "region_briefing" && !t.result.error);
+  if (!b) return null;
+  const zone = REGIONS.find((r) => r.name === b.result.region)?.key;
+  return zone ? { zone, date: String(b.result.date) } : null;
+}
 
 const regionStarters = (z: string) => [
   `What was the highest-demand day in ${z} in 2026?`,
@@ -289,6 +327,7 @@ export default function Analyst() {
                     {m.role === "user" ? m.text : <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>{m.text}</ReactMarkdown>}
                     {m.grounding && <GroundingBadge g={m.grounding} />}
                     {m.charts?.slice(0, 2).map((c, j) => <MiniChart key={j} c={c} />)}
+                    {m.role === "assistant" && (() => { const b = briefingOf(m.trace); return b ? <EmailBriefing zone={b.zone} date={b.date} /> : null; })()}
                     {m.trace && <Trace steps={m.trace} model={m.model} />}
                   </motion.div>
                 ))}
