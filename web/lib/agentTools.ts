@@ -6,7 +6,7 @@ import { ZONE_KEYS } from "@/lib/api";
 
 export type Json = Record<string, unknown>;
 /** Chart data attached to an answer for the UI. Never sent to the model (saves tokens). */
-export type Chart = { title: string; hours: number[]; series: { name: string; values: number[]; kind: "actual" | "forecast" | "alt" | "naive" }[] };
+export type Chart = { title: string; hours: number[]; series: { name: string; values: (number | null)[]; kind: "actual" | "forecast" | "alt" | "naive" }[] };
 
 export function makeTools(origin: string) {
   const cache = new Map<string, Promise<unknown>>();
@@ -24,7 +24,7 @@ export function makeTools(origin: string) {
   };
   const name = (k: string) => Object.entries(ZONE_KEYS).find(([, v]) => v === k)![0];
   const hourOf = (d: string) => Math.floor(Date.parse(String(d).slice(0, 10) + "T00:00:00Z") / 3_600_000);
-  type DayRec = { hour: number[]; forecast: number[]; actual: number[]; naive: number[]; peak_mw: number; peak_hour: number; mean_mw: number; actual_peak_mw: number; mape_pct: number; weather: Json };
+  type DayRec = { hour: number[]; forecast: number[]; actual: (number | null)[]; naive: number[]; peak_mw: number; peak_hour: number; mean_mw: number; actual_peak_mw: number | null; mape_pct: number | null; weather: Json };
   const charts: Chart[] = [];
 
   const impl: Record<string, (a: Json) => Promise<Json>> = {
@@ -65,19 +65,22 @@ export function makeTools(origin: string) {
       const k = zkey(String(zone));
       const fc = await data<Record<string, DayRec>>(`forecast/${k}.json`);
       const r = fc[String(date)];
-      if (!r) return { error: `no forecast for ${date}; forecasts cover 2025-01-01 to 2026-11-04` };
-      charts.push({ title: `${name(k)}, ${date}: forecast vs actual`, hours: r.hour, series: [
-        { name: "actual", values: r.actual, kind: "actual" }, { name: "forecast", values: r.forecast, kind: "forecast" },
+      if (!r) return { error: `no forecast for ${date}; forecasts cover 2025-01-01 to the latest forecast day` };
+      const seen = r.actual.some((v) => v != null);
+      charts.push({ title: `${name(k)}, ${date}: ${seen ? "forecast vs actual" : "day-ahead forecast"}`, hours: r.hour, series: [
+        ...(seen ? [{ name: "actual", values: r.actual, kind: "actual" as const }] : []), { name: "forecast", values: r.forecast, kind: "forecast" },
         { name: "same hour last week", values: r.naive, kind: "naive" }] });
       return { zone: name(k), date, forecast_peak_mw: r.peak_mw, forecast_peak_hour: r.peak_hour, forecast_mean_mw: r.mean_mw,
-        actual_peak_mw: r.actual_peak_mw, peak_error_mw: r.peak_mw - r.actual_peak_mw,
-        peak_error_pct: Math.round(((r.peak_mw / r.actual_peak_mw) - 1) * 1000) / 10, day_mape_pct: r.mape_pct, weather: r.weather };
+        actual_peak_mw: r.actual_peak_mw ?? "not known yet (this is a forecast)",
+        peak_error_mw: r.actual_peak_mw == null ? null : r.peak_mw - r.actual_peak_mw,
+        peak_error_pct: r.actual_peak_mw == null ? null : Math.round(((r.peak_mw / r.actual_peak_mw) - 1) * 1000) / 10,
+        day_mape_pct: r.mape_pct, weather: r.weather };
     },
     async what_if({ zone, date, temp_shift_f }) {
       const k = zkey(String(zone));
       const [meta, wi] = await Promise.all([data<{ shifts: number[] }>("meta.json"), data<Record<string, number[][]>>(`whatif/${k}.json`)]);
       const rows = wi[String(date)];
-      if (!rows) return { error: `no scenario for ${date}; available 2025-01-01 to 2026-11-04` };
+      if (!rows) return { error: `no scenario for ${date}; available from 2025-01-01 to the latest forecast day` };
       const want = Number(temp_shift_f ?? 0);
       const i = meta.shifts.reduce((b, s, j) => (Math.abs(s - want) < Math.abs(meta.shifts[b] - want) ? j : b), 0);
       const base = Math.max(...rows[meta.shifts.indexOf(0)]), alt = Math.max(...rows[i]);
@@ -88,9 +91,11 @@ export function makeTools(origin: string) {
         peak_mw_base: base, peak_mw_shifted: alt, peak_change_mw: alt - base, peak_change_pct: Math.round(((alt / base) - 1) * 1000) / 10 };
     },
     async peak_risk({ date }) {
-      const p = await data<{ days: { day: string; peak_mw: number; cutoff_mw: number; high: boolean }[] }>("peaks.json");
+      const p = await data<{ days: { day: string; peak_mw: number | null; cutoff_mw: number; high: boolean | null }[] }>("peaks.json");
       const d = p.days.find((x) => x.day === String(date));
       if (!d) return { error: `no peak-day record for ${date}` };
+      if (d.peak_mw == null) return { date: d.day, cutoff_mw: Math.round(d.cutoff_mw), actual: "not known yet",
+        note: "this day is still a forecast; use system_alert to compare the forecast peak with the cutoff" };
       return { date: d.day, system_peak_mw: Math.round(d.peak_mw), cutoff_mw: Math.round(d.cutoff_mw), high_peak_day: d.high,
         margin_pct: Math.round((d.peak_mw / d.cutoff_mw - 1) * 1000) / 10 };
     },
@@ -132,7 +137,7 @@ export function makeTools(origin: string) {
       const season = (m: number) => (m === 12 || m <= 2 ? "winter" : m <= 5 ? "spring" : m <= 8 ? "summer" : "fall");
       const acc: Record<string, { ape: number; err: number; n: number }> = {};
       for (const k of keys) {
-        const fc = await data<Record<string, { hour: number[]; forecast: number[]; actual: number[] }>>(`forecast/${k}.json`);
+        const fc = await data<Record<string, { hour: number[]; forecast: number[]; actual: (number | null)[] }>>(`forecast/${k}.json`);
         for (const [day, r] of Object.entries(fc)) {
           if (day < lo || day > hi) continue;
           const m = Number(day.slice(5, 7));
@@ -147,36 +152,38 @@ export function makeTools(origin: string) {
       }
       const groups = Object.entries(acc).map(([g, v]) => ({ [groupBy]: g, mape_pct: Math.round((v.ape / v.n) * 1000) / 10,
         mean_bias_mw: Math.round(v.err / v.n), hours: v.n }));
-      if (!groups.length) return { error: "no forecasts in that range; forecasts cover 2025-01-01 to 2026-11-04" };
+      if (!groups.length) return { error: "no forecasts in that range; forecasts cover 2025-01-01 to the latest forecast day" };
       if (groupBy === "zone" || groupBy === "season") groups.sort((a, b) => (b.mape_pct as number) - (a.mape_pct as number));
       return { zones: zone ? name(keys[0]) : "all", period: `${lo} to ${hi}`, grouped_by: groupBy,
         note: "mean_bias_mw > 0 means the model over-forecasts on average", groups };
     },
     async system_alert({ date }) {
       const day = String(date);
-      const files = await Promise.all(Object.values(ZONE_KEYS).map((k) => data<Record<string, { hour: number[]; forecast: number[]; actual: number[] }>>(`forecast/${k}.json`)));
-      if (!files.every((f) => f[day])) return { error: `no forecast for ${day}; forecasts cover 2025-01-01 to 2026-11-04` };
+      const files = await Promise.all(Object.values(ZONE_KEYS).map((k) => data<Record<string, { hour: number[]; forecast: number[]; actual: (number | null)[] }>>(`forecast/${k}.json`)));
+      if (!files.every((f) => f[day])) return { error: `no forecast for ${day}; forecasts cover 2025-01-01 to the latest forecast day` };
       const hours = files[0][day].hour;
       const fc = hours.map((_, i) => files.reduce((s, f) => s + (f[day].forecast[i] ?? 0), 0));
+      const known = files.every((f) => f[day].actual.every((v) => v != null));
       const act = hours.map((_, i) => files.reduce((s, f) => s + (f[day].actual[i] ?? 0), 0));
-      const p = await data<{ days: { day: string; peak_mw: number; cutoff_mw: number; high: boolean }[] }>("peaks.json");
+      const p = await data<{ days: { day: string; peak_mw: number | null; cutoff_mw: number; high: boolean | null }[] }>("peaks.json");
       const rec = p.days.find((x) => x.day === day);
       if (!rec) return { error: `no high-peak cutoff recorded for ${day}` };
       const peak = Math.max(...fc), margin = (peak / rec.cutoff_mw - 1) * 100;
       const level = margin >= 0 ? "ALERT" : margin >= -3 ? "WATCH" : "NORMAL";
       charts.push({ title: `ERCOT system, ${day}: forecast vs actual (cutoff ${Math.round(rec.cutoff_mw).toLocaleString("en-US")} MW)`, hours, series: [
-        { name: "actual", values: act, kind: "actual" }, { name: "forecast (sum of zones)", values: fc, kind: "forecast" },
+        ...(known ? [{ name: "actual", values: act, kind: "actual" as const }] : []), { name: "forecast (sum of zones)", values: fc, kind: "forecast" },
         { name: "high-peak cutoff", values: hours.map(() => Math.round(rec.cutoff_mw)), kind: "naive" }] });
       return { date: day, alert_level: level, rule: "ALERT if forecast peak >= cutoff, WATCH if within 3%",
         forecast_system_peak_mw: Math.round(peak), cutoff_mw: Math.round(rec.cutoff_mw), margin_pct: Math.round(margin * 10) / 10,
-        actual_system_peak_mw: Math.round(Math.max(...act)), actual_high_peak_day: rec.high };
+        actual_system_peak_mw: known ? Math.round(Math.max(...act)) : "not known yet (this is a forecast)",
+        actual_high_peak_day: known ? rec.high : "not known yet" };
     },
     async region_briefing({ zone, date }) {
       const k = zkey(String(zone));
       const day = String(date);
       const fc = await data<Record<string, DayRec>>(`forecast/${k}.json`);
       const r = fc[day];
-      if (!r) return { error: `no forecast for ${day}; briefings cover 2025-01-01 to 2026-11-04` };
+      if (!r) return { error: `no forecast for ${day}; briefings cover 2025-01-01 to the latest forecast day` };
       // 1. the region's own forecast and its usual level for this month (same month, previous two years)
       const d = await data<{ days: string[]; zones: Record<string, { peak: (number | null)[] }> }>("daily.json");
       const y = Number(day.slice(0, 4)), m = day.slice(5, 7);

@@ -37,8 +37,9 @@ def summary():
     lb_p = OUT_REPORTS / "leaderboard_ratio.csv"
     lb = pd.read_csv(lb_p) if lb_p.exists() else pd.DataFrame()
     test = lb[lb.split == "test"].sort_values("MAPE_pct") if len(lb) else lb
-    last_day = s.index.max().normalize()
-    latest = df[(df.zone == "northC") & (df.timestamp >= last_day)]
+    counts = s.groupby(s.index.normalize()).size()
+    last_day = counts[counts >= 23].index.max()          # latest complete day (today may be partial)
+    latest = df[(df.zone == "northC") & (df.timestamp >= last_day) & (df.timestamp < last_day + pd.Timedelta(days=1))]
     share = df[df.timestamp.dt.year == 2026].groupby("zone").load_mw.mean()
     return {
         "hours": int(len(s)), "start": str(s.index.min().date()), "end": str(s.index.max().date()),

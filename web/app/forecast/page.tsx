@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { get, ZONES, fmt } from "@/lib/api";
+import { useDataRange } from "@/lib/useDataRange";
 import { PageTitle, Section, Field, Stat, ErrorNote, Loading, inputCls } from "@/components/ui";
 import { HourlyLines } from "@/components/charts";
 
@@ -12,6 +13,7 @@ type F = {
 };
 
 export default function Forecast() {
+  const range = useDataRange();
   const [zone, setZone] = useState("North Central");
   const [date, setDate] = useState("2026-07-22");
   const [f, setF] = useState<F | null>(null);
@@ -24,7 +26,7 @@ export default function Forecast() {
       <PageTitle sub="The model only sees what was known the day before: the weather, the calendar, and load from two and seven days earlier.">Day-ahead forecast against what happened</PageTitle>
       <div className="flex flex-wrap gap-4">
         <Field label="Zone"><select className={inputCls} value={zone} onChange={(e) => setZone(e.target.value)}>{ZONES.map((z) => <option key={z}>{z}</option>)}</select></Field>
-        <Field label="Date"><input type="date" className={inputCls} value={date} min="2025-01-01" max="2026-11-04" onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Date"><input type="date" className={inputCls} value={date} min={range.forecastStart} max={range.forecastEnd} onChange={(e) => setDate(e.target.value)} /></Field>
       </div>
       {err && <div className="mt-6"><ErrorNote error={err} /></div>}
       {!f ? <div className="mt-8"><Loading /></div> : (
@@ -38,8 +40,8 @@ export default function Forecast() {
           </Section>
           <div className="mt-8 grid grid-cols-2 gap-8 md:grid-cols-4">
             <Stat label="Forecast peak" value={`${fmt(f.peak_mw)} MW`} hint={`at ${f.peak_hour}:00`} accent />
-            <Stat label="Actual peak" value={f.actual_peak_mw ? `${fmt(f.actual_peak_mw)} MW` : "n/a"} hint={miss ? `${miss > 0 ? "+" : ""}${fmt(miss)} MW forecast ${miss > 0 ? "over" : "under"}` : undefined} />
-            <Stat label="Error for the day" value={f.mape_pct != null ? `${f.mape_pct.toFixed(2)}%` : "n/a"} hint="mean absolute % error" />
+            <Stat label="Actual peak" value={f.actual_peak_mw ? `${fmt(f.actual_peak_mw)} MW` : "not yet known"} hint={miss ? `${miss > 0 ? "+" : ""}${fmt(miss)} MW forecast ${miss > 0 ? "over" : "under"}` : undefined} />
+            <Stat label="Error for the day" value={f.mape_pct != null ? `${f.mape_pct.toFixed(2)}%` : "after the day"} hint="mean absolute % error" />
             <Stat label="Temperature" value={`${f.weather.temp_high_f.toFixed(0)}° / ${f.weather.temp_low_f.toFixed(0)}°`} hint={`${f.weather.humidity_mean_pct}% humidity`} />
           </div>
           <Section title="What drove this forecast" aside="feature importance of the model, and the day's inputs">

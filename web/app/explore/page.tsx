@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { get, ZONES, fmt } from "@/lib/api";
+import { useDataRange } from "@/lib/useDataRange";
 import { PageTitle, Section, Field, ErrorNote, Loading, inputCls } from "@/components/ui";
 import { TempScatter, Heatmap } from "@/components/charts";
 
@@ -9,6 +10,7 @@ type Load = { zone: string; points: { t: string; mw: number; temp_f: number }[] 
 type Profile = { zone: string; heatmap: { month: number; hour: number; mw: number }[]; scatter: { temp_f: number; mw: number }[] };
 
 export default function Explore() {
+  const range = useDataRange();
   const [zone, setZone] = useState("North Central");
   const [start, setStart] = useState("2026-07-13");
   const [end, setEnd] = useState("2026-07-27");
@@ -25,8 +27,8 @@ export default function Explore() {
       <PageTitle sub="Pick a zone and a window. Demand follows temperature closely in summer and inverts in winter, which is what the models learn.">Explore load and weather</PageTitle>
       <div className="flex flex-wrap gap-4">
         <Field label="Zone"><select className={inputCls} value={zone} onChange={(e) => setZone(e.target.value)}>{ZONES.map((z) => <option key={z}>{z}</option>)}</select></Field>
-        <Field label="From"><input type="date" className={inputCls} value={start} min="2018-01-01" max="2026-11-04" onChange={(e) => setStart(e.target.value)} /></Field>
-        <Field label="To"><input type="date" className={inputCls} value={end} min="2018-01-01" max="2026-11-04" onChange={(e) => setEnd(e.target.value)} /></Field>
+        <Field label="From"><input type="date" className={inputCls} value={start} min="2018-01-01" max={range.dataEnd} onChange={(e) => setStart(e.target.value)} /></Field>
+        <Field label="To"><input type="date" className={inputCls} value={end} min="2018-01-01" max={range.dataEnd} onChange={(e) => setEnd(e.target.value)} /></Field>
       </div>
       {err && <div className="mt-6"><ErrorNote error={err} /></div>}
       <Section title={`${zone}: load and temperature`} aside={`${data.length} hours`}>

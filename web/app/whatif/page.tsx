@@ -2,12 +2,14 @@
 import { useEffect, useState } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceDot, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { get, ZONES, fmt } from "@/lib/api";
+import { useDataRange } from "@/lib/useDataRange";
 import { PageTitle, Section, Field, Stat, ErrorNote, Loading, inputCls } from "@/components/ui";
 import { HourlyLines } from "@/components/charts";
 
 type W = { zone: string; date: string; temp_shift_f: number; base_mw: number[]; shifted_mw: number[]; peak_base: number; peak_shifted: number; curve: { shift: number; peak_mw: number }[] };
 
 export default function WhatIf() {
+  const range = useDataRange();
   const [zone, setZone] = useState("Coast");
   const [date, setDate] = useState("2026-08-15");
   const [shift, setShift] = useState(6);
@@ -24,7 +26,7 @@ export default function WhatIf() {
       <PageTitle sub="Drag the slider to re-run the forecast with every hour of the day warmer or cooler. The forecast is precomputed for shifts in 3°F steps, with degree-hours and the 24- and 72-hour temperature history shifted too.">If tomorrow is hotter than forecast</PageTitle>
       <div className="flex flex-wrap items-end gap-6">
         <Field label="Zone"><select className={inputCls} value={zone} onChange={(e) => setZone(e.target.value)}>{ZONES.map((z) => <option key={z}>{z}</option>)}</select></Field>
-        <Field label="Date"><input type="date" className={inputCls} value={date} min="2025-01-01" max="2026-11-04" onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Date"><input type="date" className={inputCls} value={date} min={range.forecastStart} max={range.forecastEnd} onChange={(e) => setDate(e.target.value)} /></Field>
         <Field label={`Temperature shift: ${shift > 0 ? "+" : ""}${shift}°F`}>
           <input type="range" min={-15} max={15} step={3} value={shift} onChange={(e) => setShift(Number(e.target.value))} className="w-64" aria-label="temperature shift" />
         </Field>

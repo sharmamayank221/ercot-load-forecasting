@@ -1,0 +1,55 @@
+# Daily live refresh: pull yesterday's and today's observations, forecast tomorrow, publish.
+# Runs at 23:00 UTC (6 pm Central in summer, 5 pm in winter). The commit triggers a Vercel redeploy,
+# so the next morning's /api/dispatch (12:00 UTC) emails each zone a real day-ahead briefing.
+name: Daily data refresh
+
+on:
+  schedule:
+    - cron: "0 23 * * *"
+  workflow_dispatch: {}          # "Run workflow" button for a manual refresh
+
+permissions:
+  contents: write                # to commit the refreshed data
+
+concurrency:
+  group: daily-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      ERCOT_MODEL_TABLE: data/processed/ercot_model_table_live.parquet
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"     # match the Python that trained the saved models
+          cache: pip
+          cache-dependency-path: requirements-live.txt
+
+      - name: Install
+        run: pip install -r requirements-live.txt
+
+      - name: Pull observations and forecast tomorrow
+        env:
+          ERCOT_USER: ${{ secrets.ERCOT_USER }}
+          ERCOT_PASS: ${{ secrets.ERCOT_PASS }}
+          ERCOT_KEY: ${{ secrets.ERCOT_KEY }}
+        run: python -m src.live.refresh
+
+      - name: Peak-day labels and site data
+        run: |
+          python -m src.peak_days
+          python scripts/export_static.py
+
+      - name: Commit and push
+        run: |
+          git config user.name "ercot-refresh-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/live web/public/data
+          if git diff --cached --quiet; then echo "No changes"; exit 0; fi
+          git commit -m "Daily data refresh $(date -u +%F)"
+          git push

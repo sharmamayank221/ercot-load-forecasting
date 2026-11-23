@@ -1,9 +1,14 @@
 """Project-wide settings. Edit here, not in the scripts."""
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_PROCESSED = ROOT / "data" / "processed"
-MODEL_TABLE = DATA_PROCESSED / "ercot_model_table.parquet"
+BASE_MODEL_TABLE = DATA_PROCESSED / "ercot_model_table.parquet"
+# the daily refresh writes base + live observed rows here and points everything at it via this variable
+MODEL_TABLE = Path(os.environ.get("ERCOT_MODEL_TABLE", BASE_MODEL_TABLE))
+LIVE_DIR = ROOT / "data" / "live"
+LIVE_MODEL_TABLE = DATA_PROCESSED / "ercot_model_table_live.parquet"
 FEATURE_TABLE = DATA_PROCESSED / "features.parquet"
 PEAK_TABLE = DATA_PROCESSED / "peak_days.parquet"
 OUT_MODELS = ROOT / "outputs" / "models"

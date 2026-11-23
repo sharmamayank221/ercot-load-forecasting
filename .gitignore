@@ -19,3 +19,10 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 .DS_Store
+
+# models needed by the daily refresh job
+!outputs/models/
+outputs/models/*
+!outputs/models/gradient_boosting.joblib
+!outputs/models/xgboost.joblib
+!outputs/models/best_tuned.joblib

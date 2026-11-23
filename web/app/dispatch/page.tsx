@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Send, Eye } from "lucide-react";
 import { PageTitle, Section, Field, inputCls } from "@/components/ui";
+import { useDataRange } from "@/lib/useDataRange";
 
 type Row = { zone: string; recipients: string[]; level?: string; status: string; detail: string };
 type Result = { ok: boolean; error?: string; date?: string; mode?: string; dryRun?: boolean; emails_sent?: number; zones?: Row[] };
@@ -11,6 +12,7 @@ const STATUS: Record<string, string> = { sent: "#14706a", "would send": "#1c5ba6
 
 /** Owner-only page: preview and send each zone's briefing to that zone's subscribers. Not linked from the nav. */
 export default function Dispatch() {
+  const range = useDataRange();
   const [secret, setSecret] = useState("");
   const [date, setDate] = useState("2026-08-18");
   const [mode, setMode] = useState<"alerts" | "all">("alerts");
@@ -33,7 +35,7 @@ export default function Dispatch() {
       <PageTitle sub="Each zone's subscribers get that zone's briefing. In “notable only” mode a zone is emailed only when its briefing flags something: a grid alert or watch, demand well above normal for the month, extreme heat or a freeze. Subscriber lists are set in the ZONE_SUBSCRIBERS environment variable.">Zone email dispatch</PageTitle>
       <div className="flex flex-wrap items-end gap-4">
         <Field label="Dispatch secret"><input type="password" className={inputCls} value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" /></Field>
-        <Field label="Briefing date"><input type="date" className={inputCls} value={date} min="2025-01-01" max="2026-11-04" onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Briefing date"><input type="date" className={inputCls} value={date} min={range.forecastStart} max={range.forecastEnd} onChange={(e) => setDate(e.target.value)} /></Field>
         <Field label="Send to">
           <select className={inputCls} value={mode} onChange={(e) => setMode(e.target.value as "alerts" | "all")}>
             <option value="alerts">Notable zones only</option><option value="all">Every subscribed zone</option>

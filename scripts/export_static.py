@@ -21,7 +21,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from src.config import FEATURE_TABLE                       # noqa: E402
+from src.config import FEATURE_TABLE, PEAK_TABLE                       # noqa: E402
 from src.features import feature_columns                   # noqa: E402
 from src.agent import tools as T                           # noqa: E402
 import api.main as A                                       # noqa: E402
@@ -73,7 +73,7 @@ def main(start):
     print("summary, eda, peaks ...")
     sizes["summary"] = write("summary.json", A.summary())
     sizes["eda"] = write("eda.json", A.eda())
-    sizes["peaks"] = write("peaks.json", A.peaks())
+    peaks = A.peaks()
 
     model, model_name = T._model()
     feats_df = pd.read_parquet(FEATURE_TABLE)
@@ -102,17 +102,19 @@ def main(start):
         for day, g in d.groupby("day", sort=True):
             idx = d.index.get_indexer(g.index)
             f0 = preds[0][idx]
-            act = g.load_mw.to_numpy()
+            act = g.load_mw.to_numpy(dtype="float64")
+            seen = ~np.isnan(act)                 # tomorrow (and the rest of today) has no actuals yet
             i = int(f0.argmax())
             fc[day] = {
                 "hour": g.hour.tolist(),
                 "forecast": np.round(f0).astype(int).tolist(),
-                "actual": np.round(act).astype(int).tolist(),
+                "actual": [int(round(v)) if not np.isnan(v) else None for v in act],
                 "naive": np.round(g.load_lag_168h.to_numpy()).astype(int).tolist(),
                 "temp": g.temp_f.astype("float64").round(1).tolist(),
                 "peak_mw": int(round(f0.max())), "peak_hour": int(g.hour.iloc[i]), "mean_mw": int(round(f0.mean())),
-                "actual_peak_mw": int(round(act.max())),
-                "mape_pct": round(float(np.mean(np.abs(f0 - act) / act) * 100), 2),
+                "actual_peak_mw": int(round(np.nanmax(act))) if seen.all() else None,
+                "mape_pct": round(float(np.mean(np.abs(f0[seen] - act[seen]) / act[seen]) * 100), 2) if seen.all() else None,
+                "forecast_only": bool(not seen.any()),
                 "weather": {"temp_high_f": round(float(g.temp_f.max()), 1), "temp_low_f": round(float(g.temp_f.min()), 1),
                             "humidity_mean_pct": int(round(g.rhum.mean()))},
                 "inputs": {"temp_high_f": round(float(g.temp_f.max()), 1),
@@ -136,6 +138,18 @@ def main(start):
                       "mean": zp["mean"][k].reindex(alldays).round().astype("Int64").tolist()} for k in T.ZONE_NAMES}})
 
     days = sorted(fc)
+    # forecast days past the last labelled day get a projected high-peak cutoff, so the alert works for tomorrow
+    pk = pd.read_parquet(PEAK_TABLE).sort_values("day")
+    known = {d["day"] for d in peaks["days"]}
+    trail = float(pk.peak_mw.tail(365).mean())
+    for day in days:
+        if day in known:
+            continue
+        m = int(day[5:7])
+        hist = pk[pk.day.dt.month == m]
+        ratio = float(hist.cutoff_ratio.iloc[-1]) if len(hist) else float(pk.cutoff_ratio.iloc[-1])
+        peaks["days"].append({"day": day, "peak_mw": None, "cutoff_mw": round(ratio * trail, 1), "high": None, "forecast_only": True})
+    sizes["peaks"] = write("peaks.json", peaks)
     lb = A.summary()["leaderboard"]
     sizes["meta"] = write("meta.json", {
         "zones": [{"key": k, "name": n} for k, n in T.ZONE_NAMES.items()],
