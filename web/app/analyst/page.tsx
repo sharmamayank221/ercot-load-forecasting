@@ -13,7 +13,8 @@ type Chart = { title: string; hours: number[]; series: { name: string; values: n
 type Step = { tool: string; args: Record<string, unknown>; result: Record<string, unknown> };
 type Grounding = { checked: number; ungrounded: string[] };
 type Reply = { answer: string; tools: string[]; trace?: Step[]; charts?: Chart[]; model?: string; grounding?: Grounding };
-type Msg = { role: "user" | "assistant"; text: string; tools?: string[]; trace?: Step[]; charts?: Chart[]; model?: string; grounding?: Grounding };
+type Emailed = { ok: boolean; to?: string; msg: string; auto?: boolean };
+type Msg = { role: "user" | "assistant"; text: string; tools?: string[]; trace?: Step[]; charts?: Chart[]; model?: string; grounding?: Grounding; emailed?: Emailed };
 
 function GroundingBadge({ g }: { g: Grounding }) {
   if (!g.checked) return null;
@@ -73,6 +74,62 @@ function briefingOf(trace?: Step[]) {
   if (!b) return null;
   const zone = REGIONS.find((r) => r.name === b.result.region)?.key;
   return zone ? { zone, date: String(b.result.date) } : null;
+}
+
+const ADDR_KEY = "ercot-brief-email", AUTO_KEY = "ercot-auto-email";
+const readAddr = () => { try { return localStorage.getItem(ADDR_KEY) ?? ""; } catch { return ""; } };
+
+/** Header popover: your address, and whether briefings are emailed to you automatically. */
+function EmailSettings({ addr, auto, onChange }: { addr: string; auto: boolean; onChange: (addr: string, auto: boolean) => void }) {
+  return (
+    <details className="relative text-[13px]">
+      <summary className="flex cursor-pointer list-none items-center gap-1 whitespace-nowrap text-muted hover:text-ink">
+        <Mail size={15} /> Email{auto && addr ? <span className="ml-1 rounded-full bg-heat-soft px-2 text-[11px] font-semibold text-[#a8441c]">auto</span> : null}
+      </summary>
+      <div className="absolute right-0 z-10 mt-2 flex w-80 flex-col gap-3 rounded-md border border-rule bg-panel p-4 shadow-lg">
+        <label className="flex flex-col gap-1 text-muted">Your email address
+          <input type="email" value={addr} onChange={(e) => onChange(e.target.value, auto)} placeholder="name@mavs.uta.edu"
+            className="rounded border border-rule bg-paper px-2 py-1.5 text-[14px] text-ink" />
+        </label>
+        <label className="flex items-start gap-2">
+          <input type="checkbox" checked={auto} onChange={(e) => onChange(addr, e.target.checked)} className="mt-0.5" />
+          <span><b>Email my briefings automatically.</b> Every regional briefing is sent to this address as soon as it arrives. Other answers have an “Email this answer” button.</span>
+        </label>
+        <p className="text-[12px] text-muted">Only approved addresses can receive email. Saved in this browser.</p>
+      </div>
+    </details>
+  );
+}
+
+/** Manual email for any non-briefing answer: carries the model's text, with the numbers check and tools used. */
+function EmailAnswer({ question, m }: { question: string; m: Msg }) {
+  const [open, setOpen] = useState(false);
+  const [to, setTo] = useState("");
+  const [state, setState] = useState<{ kind: "idle" | "sending" | "ok" | "err"; msg?: string }>({ kind: "idle" });
+  useEffect(() => { setTo(readAddr()); }, []);
+  if (!open) return (
+    <button onClick={() => setOpen(true)} className="mt-3 inline-flex items-center gap-1.5 text-[13px] text-muted hover:text-ink"><Mail size={14} /> Email this answer</button>
+  );
+  async function go(e: React.FormEvent) {
+    e.preventDefault(); if (!to.trim()) return;
+    setState({ kind: "sending" });
+    try {
+      const r = await fetch("/api/answer-email", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: to.trim(), question, answer: m.text, tools: m.tools, grounding: m.grounding }) });
+      const j = await r.json();
+      setState(j.ok ? { kind: "ok", msg: `Sent to ${j.to}.` } : { kind: "err", msg: j.error ?? "Could not send." });
+    } catch (err) { setState({ kind: "err", msg: (err as Error).message }); }
+  }
+  return (
+    <form onSubmit={go} className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-rule bg-paper px-3 py-2 text-[13px]">
+      <Mail size={15} className="text-muted" /><span className="text-muted">Email this answer to</span>
+      <input type="email" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Email address for this answer"
+        className="min-w-[200px] flex-1 rounded border border-rule bg-panel px-2 py-1 text-[13px]" />
+      <button type="submit" aria-label="Send answer email" disabled={state.kind === "sending" || !to.trim()}
+        className="rounded bg-ink px-3 py-1 font-semibold text-paper disabled:opacity-40">{state.kind === "sending" ? "Sending…" : "Send"}</button>
+      {state.msg && <span className="w-full" style={{ color: state.kind === "ok" ? "#14706a" : "#a8441c" }}>{state.msg}</span>}
+    </form>
+  );
 }
 
 const regionStarters = (z: string) => [
@@ -221,8 +278,17 @@ export default function Analyst() {
   const [briefDate, setBriefDate] = useState("2026-08-18");
   const [range, setRange] = useState<{ start: string; end: string }>({ start: "2025-01-01", end: "2026-11-04" });
   const setRegion = (r: Region | null) => { setRegionState(r); saveRegion(r); };
+  const [mailAddr, setMailAddr] = useState("");
+  const [autoMail, setAutoMail] = useState(false);
+  const setMail = (addr: string, auto: boolean) => {
+    setMailAddr(addr); setAutoMail(auto);
+    try { localStorage.setItem(ADDR_KEY, addr); localStorage.setItem(AUTO_KEY, auto ? "1" : ""); } catch { /* private mode */ }
+  };
 
-  useEffect(() => { setChats(loadChats()); setRegionState(loadRegion()); setLoaded(true); }, []);
+  useEffect(() => {
+    setChats(loadChats()); setRegionState(loadRegion()); setLoaded(true);
+    try { setMailAddr(localStorage.getItem(ADDR_KEY) ?? ""); setAutoMail(localStorage.getItem(AUTO_KEY) === "1"); } catch { /* ignore */ }
+  }, []);
   useEffect(() => { loadJSON<Meta>("meta.json").then((m) => setRange({ start: m.forecast_start, end: m.forecast_end })).catch(() => {}); }, []);
   useEffect(() => { if (loaded) saveChats(chats); }, [chats, loaded]);
 
@@ -242,6 +308,13 @@ export default function Analyst() {
     return [chat, ...list.filter((c) => c.id !== id)];
   });
 
+  /** Update the newest assistant message in a chat (used to record an automatic email). */
+  const patchLast = (id: string, extra: Partial<Msg>) => setChats((list) => list.map((c) => {
+    if (c.id !== id) return c;
+    const i = c.msgs.map((m) => m.role).lastIndexOf("assistant");
+    return i < 0 ? c : { ...c, msgs: c.msgs.map((m, j) => (j === i ? { ...m, ...extra } : m)) };
+  }));
+
   async function send(text: string) {
     if (!text.trim() || busy) return;
     const id = active ?? newId();
@@ -252,6 +325,14 @@ export default function Analyst() {
     try {
       const r = await post<Reply>("/api/agent", { question: text, history, region: region?.key });
       push(id, { role: "assistant", text: r.answer, tools: r.tools, trace: r.trace, charts: r.charts, model: r.model, grounding: r.grounding });
+      // automatic email for briefings, if the visitor opted in
+      const b = briefingOf(r.trace);
+      if (b && autoMail && mailAddr.trim()) {
+        fetch("/api/brief-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...b, to: mailAddr.trim() }) })
+          .then((res) => res.json())
+          .then((j) => patchLast(id, { emailed: j.ok ? { ok: true, to: j.to, msg: `Emailed to ${j.to} automatically.`, auto: true } : { ok: false, msg: j.error ?? "Automatic email failed.", auto: true } }))
+          .catch((err) => patchLast(id, { emailed: { ok: false, msg: (err as Error).message, auto: true } }));
+      }
     } catch (e) {
       push(id, { role: "assistant", text: `Could not reach the agent: ${(e as Error).message}` });
     } finally { setBusy(false); }
@@ -272,8 +353,9 @@ export default function Analyst() {
         </div>
         <div className="flex items-start gap-5">
         <RegionPicker region={region} onChange={setRegion} />
+        <EmailSettings addr={mailAddr} auto={autoMail} onChange={setMail} />
         <details className="relative text-[13px]">
-          <summary className="flex cursor-pointer list-none items-center gap-1 text-muted hover:text-ink"><Info size={15} /> How it works</summary>
+          <summary className="flex cursor-pointer list-none items-center gap-1 whitespace-nowrap text-muted hover:text-ink"><Info size={15} /> How it works</summary>
           <div className="absolute right-0 z-10 mt-2 w-80 rounded-md border border-rule bg-panel p-4 leading-relaxed shadow-lg">
             The model answers only by calling tools over the project&apos;s data: load history, weather, forecasts,
             what-if scenarios, rankings, error breakdowns and the peak alert. Every number is checked against the tool
@@ -327,7 +409,16 @@ export default function Analyst() {
                     {m.role === "user" ? m.text : <ReactMarkdown remarkPlugins={[remarkGfm]} components={md}>{m.text}</ReactMarkdown>}
                     {m.grounding && <GroundingBadge g={m.grounding} />}
                     {m.charts?.slice(0, 2).map((c, j) => <MiniChart key={j} c={c} />)}
-                    {m.role === "assistant" && (() => { const b = briefingOf(m.trace); return b ? <EmailBriefing zone={b.zone} date={b.date} /> : null; })()}
+                    {m.role === "assistant" && (() => {
+                      const b = briefingOf(m.trace);
+                      if (b) return (<>
+                        {m.emailed && <div className="mt-3 text-[13px] font-semibold" style={{ color: m.emailed.ok ? "#14706a" : "#a8441c" }}>{m.emailed.ok ? "✓ " : "⚠ "}{m.emailed.msg}</div>}
+                        {!m.emailed?.ok && <EmailBriefing zone={b.zone} date={b.date} />}
+                      </>);
+                      const failed = /^(Agent unavailable|Could not reach|Stopped after)/.test(m.text);
+                      const q = [...msgs.slice(0, i)].reverse().find((x) => x.role === "user")?.text ?? "";
+                      return failed || !m.trace?.length ? null : <EmailAnswer question={q} m={m} />;
+                    })()}
                     {m.trace && <Trace steps={m.trace} model={m.model} />}
                   </motion.div>
                 ))}
