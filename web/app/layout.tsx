@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Nav from "@/components/Nav";
 
-export const metadata: Metadata = { title: "ERCOT demand forecasting", description: "Day-ahead load forecasts for the Texas grid" };
+export const metadata: Metadata = { title: "ERCOT load: time-series analysis", description: "ASDS 5306 Group 3: classical time-series models and Ridge for 24-hour ERCOT load forecasts" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

@@ -1,16 +1,14 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, Compass, LineChart, Thermometer, Flame, MessageSquare, BarChart3 } from "lucide-react";
+import { Activity, BarChart3, Compass, Trophy, Waves } from "lucide-react";
 
 const items = [
   { href: "/", label: "Overview", icon: Activity },
   { href: "/eda", label: "The data", icon: BarChart3 },
   { href: "/explore", label: "Explore", icon: Compass },
-  { href: "/forecast", label: "Forecast", icon: LineChart },
-  { href: "/whatif", label: "What-if", icon: Thermometer },
-  { href: "/peaks", label: "Peak days", icon: Flame },
-  { href: "/analyst", label: "Analyst", icon: MessageSquare },
+  { href: "/structure", label: "Structure", icon: Waves },
+  { href: "/models", label: "Models & results", icon: Trophy },
 ];
 
 export default function Nav() {
@@ -33,7 +31,7 @@ export default function Nav() {
         })}
       </nav>
       <div className="mt-auto text-[12px] leading-relaxed text-muted">
-        Hourly load for 8 weather zones, 2018 to Nov 2026. Models: gradient boosting, XGBoost, random forest, stacking.
+        ASDS 5306 Applied Time Series Analysis · Group 3. Hourly load for the system and 8 weather zones, 2018 to Nov 2026.
       </div>
     </aside>
   );
