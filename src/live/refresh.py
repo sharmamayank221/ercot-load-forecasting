@@ -55,12 +55,15 @@ def pull_weather_obs(start, end):
     from src.data_pipeline.ercot_weather_pull import to_ercot_hours
     out = []
     for z, (sid, _, _) in STATIONS.items():
-        raw = Hourly(sid, pd.Timestamp(start).to_pydatetime() - timedelta(days=1), pd.Timestamp(end).to_pydatetime() + timedelta(days=1)).fetch()
+        # model=False: real observations only (by default Meteostat fills unobserved hours with model estimates)
+        raw = Hourly(sid, pd.Timestamp(start).to_pydatetime() - timedelta(days=1), pd.Timestamp(end).to_pydatetime() + timedelta(days=1), model=False).fetch()
         if raw.empty:
             continue
         raw = raw[[v for v in WVARS if v in raw.columns]]
         raw = raw.reindex(pd.date_range(raw.index.min(), raw.index.max(), freq="h"))
         raw[[c for c in raw.columns if c != "prcp"]] = raw[[c for c in raw.columns if c != "prcp"]].interpolate(limit=3, limit_direction="both")
+        if "prcp" in raw:
+            raw["prcp"] = raw["prcp"].fillna(0)          # as in training: no rain report = no rain
         w = to_ercot_hours(raw)
         w["zone"] = z
         out.append(w[(w.timestamp >= pd.Timestamp(start)) & (w.timestamp < pd.Timestamp(end) + pd.Timedelta(days=1))])
@@ -80,6 +83,22 @@ def pull_weather_forecast():
         df["zone"], df["DSTFlag"] = z, df.timestamp.duplicated()
         out.append(df)
     return pd.concat(out, ignore_index=True)
+
+
+def merge_weather(obs, fc):
+    """Observed weather where it is complete, forecast weather for every missing value or hour.
+
+    Hour by hour and variable by variable, rather than switching to the forecast at one cut-off time,
+    so a station gap or a missing variable never blanks out a forecast hour.
+    """
+    keys = ["zone", "timestamp", "DSTFlag"]
+    o = obs.drop_duplicates(keys, keep="last").set_index(keys)[WVARS].astype("float64")
+    f = fc.drop_duplicates(keys, keep="first").set_index(keys)[WVARS].astype("float64")
+    w = o.combine_first(f).reset_index().sort_values(["zone", "timestamp", "DSTFlag"])
+    w["prcp"] = w["prcp"].fillna(0)
+    others = [c for c in WVARS if c != "prcp"]
+    w[others] = w.groupby("zone")[others].transform(lambda c: c.interpolate(limit=3, limit_direction="both"))
+    return w
 
 
 # ------------------------------------------------------------------ simulation (offline test with local data)
@@ -133,9 +152,9 @@ def main(simulate=None):
 
     # weather for every hour through the end of tomorrow: observed where we have it, forecast after
     wx_obs = pd.concat([base[["timestamp", "DSTFlag", "zone"] + WVARS], live_weather[["timestamp", "DSTFlag", "zone"] + WVARS]])
-    wx_obs = wx_obs.drop_duplicates(["timestamp", "DSTFlag", "zone"], keep="last")
-    fc = fc[fc.timestamp > wx_obs.timestamp.max()]
-    weather = pd.concat([wx_obs, fc]).drop_duplicates(["timestamp", "DSTFlag", "zone"], keep="first")
+    if not simulate:   # never trust "observations" from the future
+        wx_obs = wx_obs[wx_obs.timestamp <= pd.Timestamp(datetime.now(CT).replace(tzinfo=None))]
+    weather = merge_weather(wx_obs, fc)
 
     # one row per zone-hour, contiguous to the end of tomorrow, so the 48 h / 168 h lags line up
     grid = pd.MultiIndex.from_product([ZONES, pd.date_range(observed.timestamp.min(), tomorrow + pd.Timedelta(hours=23), freq="h")],
